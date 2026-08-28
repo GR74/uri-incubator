@@ -695,6 +695,32 @@ const TABS = {
   partner: () => [['partnerShelf','Open projects'],['partnerTalent','Researchers']],
 };
 
+function Ticker({ items }){
+  const ref = useRef(null);
+  const [avail, setAvail] = useState(9999);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const measure = () => setAvail(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure); ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  /* mono at 9.5px with wide tracking is ~7.4px a character, plus the separator */
+  let used = 0, fit = 0;
+  items.forEach(t => { used += t.length * 7.4 + 22; if (used <= avail) fit++; });
+  return (
+    <div ref={ref} className="hidden lg:flex items-center justify-end min-w-0 flex-1 overflow-hidden
+                              font-mono text-[9.5px] uppercase tracking-wider2 text-faint">
+      {items.slice(0, Math.max(1, fit)).map((t, i) => (
+        <span key={t} className="whitespace-nowrap shrink-0">
+          {i > 0 && <span className="opacity-40 mx-3">·</span>}{t}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function Masthead({ me, setMe, view, setView, ticker, openPalette, openTour }){
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -807,14 +833,7 @@ function Masthead({ me, setMe, view, setView, ticker, openPalette, openTour }){
               </button>
             ))}
           </nav>
-          <div className="hidden xl:flex items-center gap-4 font-mono text-[9.5px] uppercase tracking-wider2 text-faint min-w-0 overflow-hidden">
-            {ticker.map((t,i) => (
-              <React.Fragment key={t}>
-                {i > 0 && <span className="opacity-40 shrink-0">·</span>}
-                <span className="whitespace-nowrap shrink-0">{t}</span>
-              </React.Fragment>
-            ))}
-          </div>
+          <Ticker items={ticker} />
         </div>
       </div>
       <div className="h-px w-full bg-rule2" />
@@ -4778,8 +4797,8 @@ function App(){
        'introductions brokered']
     : [pl(scoped.length,'project','projects'),
        pl(scopedEntries,'entry','entries'),
-       pl(openShelf.length,'project','projects') + ' on the shelf',
-       nextDep ? 'next departure ' + daysUntil(nextDep.departs) + 'd' : 'no departures queued'];
+       openShelf.length + ' shelved',
+       nextDep ? daysUntil(nextDep.departs) + 'd to next departure' : 'no departures queued'];
 
   return (
     <NavCtx.Provider value={{ openRecord, open, openItem }}>

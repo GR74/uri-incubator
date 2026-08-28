@@ -1695,6 +1695,37 @@ const TABS = {
   sup: () => [['register', 'Register'], ['risk', 'Continuity risk'], ['map', 'Map'], ['handoffs', 'Handoffs'], ['shelf', 'The Shelf'], ['extract', 'Shelve a project']],
   partner: () => [['partnerShelf', 'Open projects'], ['partnerTalent', 'Researchers']]
 };
+function Ticker({
+  items
+}) {
+  const ref = useRef(null);
+  const [avail, setAvail] = useState(9999);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setAvail(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  let used = 0,
+    fit = 0;
+  items.forEach(t => {
+    used += t.length * 7.4 + 22;
+    if (used <= avail) fit++;
+  });
+  return React.createElement("div", {
+    ref: ref,
+    className: "hidden lg:flex items-center justify-end min-w-0 flex-1 overflow-hidden\r font-mono text-[9.5px] uppercase tracking-wider2 text-faint"
+  }, items.slice(0, Math.max(1, fit)).map((t, i) => React.createElement("span", {
+    key: t,
+    className: "whitespace-nowrap shrink-0"
+  }, i > 0 && React.createElement("span", {
+    className: "opacity-40 mx-3"
+  }, "\u00b7"), t)));
+}
 function Masthead({
   me,
   setMe,
@@ -1839,15 +1870,9 @@ function Masthead({
     className: 'relative font-mono text-[10.5px] uppercase tracking-wider2 px-3.5 py-3 whitespace-nowrap transition-colors ' + (view === k ? 'text-ink' : 'text-faint hover:text-ink2')
   }, label, view === k && React.createElement("span", {
     className: "absolute left-0 right-0 bottom-0 h-[2px] bg-ink"
-  })))), React.createElement("div", {
-    className: "hidden xl:flex items-center gap-4 font-mono text-[9.5px] uppercase tracking-wider2 text-faint min-w-0 overflow-hidden"
-  }, ticker.map((t, i) => React.createElement(React.Fragment, {
-    key: t
-  }, i > 0 && React.createElement("span", {
-    className: "opacity-40 shrink-0"
-  }, "\u00b7"), React.createElement("span", {
-    className: "whitespace-nowrap shrink-0"
-  }, t)))))), React.createElement("div", {
+  })))), React.createElement(Ticker, {
+    items: ticker
+  }))), React.createElement("div", {
     className: "h-px w-full bg-rule2"
   }));
 }
@@ -7247,7 +7272,7 @@ function App() {
   const scopedEntries = scoped.reduce((a, p) => a + p.log.length, 0);
   const nextDep = PEOPLE.filter(x => x.tier === 'ug' && x.departs && daysUntil(x.departs) > 0 && scoped.some(pr => (x.projects || []).includes(pr.id))).sort((a, b) => d(a.departs) - d(b.departs))[0];
   const partnerListed = shelf.filter(s => s.visibility === 'partner' && !s.claimedBy).length;
-  const ticker = lens === 'partner' ? [pl(partnerListed, 'project', 'projects') + ' listed', shelf.filter(s => s.visibility !== 'partner').length + ' withheld', pl(shared.length, 'researcher record', 'researcher records'), 'introductions brokered'] : [pl(scoped.length, 'project', 'projects'), pl(scopedEntries, 'entry', 'entries'), pl(openShelf.length, 'project', 'projects') + ' on the shelf', nextDep ? 'next departure ' + daysUntil(nextDep.departs) + 'd' : 'no departures queued'];
+  const ticker = lens === 'partner' ? [pl(partnerListed, 'project', 'projects') + ' listed', shelf.filter(s => s.visibility !== 'partner').length + ' withheld', pl(shared.length, 'researcher record', 'researcher records'), 'introductions brokered'] : [pl(scoped.length, 'project', 'projects'), pl(scopedEntries, 'entry', 'entries'), openShelf.length + ' shelved', nextDep ? daysUntil(nextDep.departs) + 'd to next departure' : 'no departures queued'];
   return React.createElement(NavCtx.Provider, {
     value: {
       openRecord,
