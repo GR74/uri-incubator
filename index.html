@@ -230,6 +230,8 @@
   }
   header { transition: box-shadow .3s ease, background-color .3s ease; }
   header.floated { box-shadow: 0 1px 0 #C2C0BA, 0 14px 30px -26px rgba(26,25,23,.5); }
+  @keyframes flashIn { 0%{ background:rgba(187,0,0,.14) } 100%{ background:transparent } }
+  .flash { animation: flashIn 1.6s ease-out; border-radius:3px; }
   .tabscroll { -ms-overflow-style:none; scrollbar-width:none; }
   .tabscroll::-webkit-scrollbar { display:none; }
 
@@ -813,6 +815,13 @@ const SEED = [{
     au: 'W. Chao / M. Okonkwo',
     h: 'Activity assay locked to pNPB, not PET film',
     b: 'Crystalline PET film hydrolysis had 40% CV across replicates \u2014 crystallinity varies within a single sheet. p-nitrophenyl butyrate at 40 \u00b0C gives 6% CV.',
+    links: [{
+      t: 'governs',
+      to: 'e3'
+    }, {
+      t: 'governs',
+      to: 'e7'
+    }],
     why: 'We accept the proxy explicitly: every kcat in this project is an esterase rate on a soluble substrate, NOT a polymer degradation rate. Do not write "PET degradation" in a figure caption. Two reviewers have caught exactly this in neighbouring labs.'
   }, {
     id: 'e3',
@@ -829,6 +838,10 @@ const SEED = [{
     sev: 'high',
     h: 'Rosetta ddG design of the 165\u2013175 loop \u2014 abandoned',
     b: 'Designed 12 predicted-stabilizing mutants in the 165\u2013175 loop. Eleven of twelve lost more than 80% of WT activity; the survivor was \u0394Tm +0.4 \u00b0C, i.e. noise. Roughly one full semester.',
+    links: [{
+      t: 'forced',
+      to: 'e5'
+    }],
     why: 'The loop is catalytically coupled \u2014 it packs against the W185 wobble that gates substrate entry. ddG scores stability in isolation and is structurally blind to that coupling. Any purely stability-driven design in this loop will keep failing. If you want to touch 165\u2013175, you need an activity-coupled method, not a ddG filter.'
   }, {
     id: 'e5',
@@ -969,6 +982,10 @@ const SEED = [{
     au: 'R. Kalman / H. Berg',
     h: 'The unit of analysis is the mouse, not the neuron',
     b: 'Descriptive statistics are reported per neuron (currently n = 1,847 cells). All inferential statistics bootstrap over animals, n = 6.',
+    links: [{
+      t: 'governs',
+      to: 'f4'
+    }],
     why: 'Cells within a mouse are not independent samples \u2014 shared brain state, shared field of view, shared virus expression. Treating 1,847 cells as n inflates significance by roughly an order of magnitude. This is the single most likely thing a reviewer kills the paper over. If you see an n above 100 in a P-value context in this project, it is a bug.'
   }, {
     id: 'f3',
@@ -1000,6 +1017,10 @@ const SEED = [{
     au: 'D. Park',
     sev: 'low',
     h: 'Pupil-size regression as an arousal covariate \u2014 shelved, not refuted',
+    links: [{
+      t: 'informs',
+      to: 'shelf:s2'
+    }],
     b: 'Tried to regress out arousal using pupil diameter from the eye camera. The camera loses the pupil in about 18% of frames (whisking occludes it) and the interpolated trace injected more variance than it removed. The idea is not wrong \u2014 the rig needs a second camera angle first.'
   }, {
     id: 'f7',
@@ -1091,6 +1112,10 @@ const SEED = [{
     au: 'N. Bekele / E. Vasquez-Moreau',
     h: 'Residence time is reported as a distribution, never a mean',
     b: 'The transport model produces a strongly right-skewed residence time; the mean is dominated by a small trapped fraction in the upper marsh. We report the median and the 90th percentile.',
+    links: [{
+      t: 'governs',
+      to: 'g4'
+    }],
     why: 'A single mean residence time was the headline number reviewers wanted, and it would have been misleading. Reviewer 2 pushed on exactly this and we held the line \u2014 see the response letter.'
   }, {
     id: 'g4',
@@ -1676,7 +1701,8 @@ function Masthead({
   view,
   setView,
   ticker,
-  openPalette
+  openPalette,
+  openTour
 }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -1731,6 +1757,12 @@ function Masthead({
       className: 'font-mono text-[10px] uppercase tracking-wider2 px-3 py-2 transition-colors ' + (on ? 'bg-ink text-paper' : 'text-faint hover:text-ink2')
     }, l);
   })), React.createElement("button", {
+    onClick: openTour,
+    "aria-label": "Start the guided walkthrough",
+    className: "hidden lg:flex items-center gap-2 border hair rounded-[3px] px-3 py-2 text-faint hover:text-ink hover:border-rule2 transition-colors"
+  }, React.createElement("span", {
+    className: "font-mono text-[10px] uppercase tracking-wider2"
+  }, "Walkthrough")), React.createElement("button", {
     onClick: openPalette,
     "aria-label": "Search the index",
     className: "hidden md:flex items-center gap-2 border hair rounded-[3px] px-3 py-2 text-faint hover:text-ink hover:border-rule2 transition-colors"
@@ -2965,8 +2997,26 @@ function ProjectDetail({
   goOnboard,
   addEntry,
   ack,
-  open
+  open,
+  edges,
+  openItem
 }) {
+  const onEntry = (eid, proj) => {
+    if (proj && proj.id !== p.id) {
+      open(proj.id);
+      setTimeout(() => flash(eid), 420);
+    } else flash(eid);
+  };
+  const flash = eid => {
+    const el = document.getElementById('e-' + eid);
+    if (!el) return;
+    el.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center'
+    });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1600);
+  };
   const [active, setActive] = useState([]);
   const [composing, setComposing] = useState(false);
   const ci = continuity(p),
@@ -3084,7 +3134,11 @@ function ProjectDetail({
     i: i,
     sup: sup,
     me: me,
-    onAck: () => ack(p.id, e.id)
+    onAck: () => ack(p.id, e.id),
+    edges: edges,
+    project: p,
+    onEntry: onEntry,
+    onShelf: openItem
   })), log.length === 0 && React.createElement("p", {
     className: "font-display italic text-muted py-10 pl-8"
   }, "Nothing of that type in this log."), React.createElement("div", {
@@ -3171,12 +3225,17 @@ function Entry({
   i,
   sup,
   me,
-  onAck
+  onAck,
+  edges,
+  project,
+  onEntry,
+  onShelf
 }) {
   const T = TYPES[e.t];
   const isDead = e.t === 'deadend';
   const isMine = authorsOf(e).some(a => a.k === me.k);
   return React.createElement("div", {
+    id: 'e-' + e.id,
     className: "relative pl-8 pb-9 rise",
     style: {
       animationDelay: i * 45 + 'ms'
@@ -3216,7 +3275,13 @@ function Entry({
     className: 'font-display text-[21px] leading-snug mt-2 measure ' + (isDead ? 'text-oxblood' : '')
   }, e.h), React.createElement("p", {
     className: "text-[13.5px] leading-[1.7] text-ink2 mt-2 measure"
-  }, e.b), e.why && React.createElement("div", {
+  }, e.b), edges && React.createElement(EdgeChips, {
+    id: e.id,
+    edges: edges,
+    project: project,
+    onEntry: onEntry,
+    onShelf: onShelf
+  }), e.why && React.createElement("div", {
     className: "mt-3 measure rounded-[3px] px-4 py-3",
     style: {
       background: T.tint,
@@ -5838,6 +5903,46 @@ function Orientation({
     className: "font-mono text-[10px] uppercase tracking-wider2 px-4 py-3 border hair rounded-[2px] hover:border-ink transition-colors"
   }, "Let me look around")))));
 }
+function TourOffer({
+  onStart,
+  onDismiss
+}) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setShown(true), 2000);
+    return () => clearTimeout(t);
+  }, []);
+  if (!shown) return null;
+  return React.createElement("div", {
+    role: "dialog",
+    "aria-label": "Take the walkthrough",
+    className: "fixed bottom-5 left-4 right-4 sm:left-auto sm:right-6 sm:w-[340px] z-[70] bg-card border hair rounded-[4px] p-5 rise",
+    style: {
+      boxShadow: '0 34px 70px -34px rgba(26,25,23,.62)',
+      borderLeft: '3px solid #BB0000'
+    }
+  }, React.createElement(Kicker, {
+    style: {
+      color: '#BB0000'
+    }
+  }, "First time here?"), React.createElement("p", {
+    className: "font-display text-[19px] leading-snug mt-2"
+  }, "Want the walkthrough?"), React.createElement("p", {
+    className: "text-[12.5px] text-muted mt-1.5 leading-relaxed"
+  }, "Six stops, about three minutes. It drives itself \u2014 switching roles as it goes, so you see the same log from each side."), React.createElement("div", {
+    className: "flex items-center gap-2 mt-4"
+  }, React.createElement("button", {
+    onClick: onStart,
+    className: "font-mono text-[10px] uppercase tracking-wider2 px-4 py-2.5 rounded-[2px] hover:tracking-[.24em] transition-all",
+    style: {
+      background: '#BB0000',
+      color: '#F2F1EE'
+    }
+  }, "Yes, show me"), React.createElement("button", {
+    onClick: onDismiss,
+    className: "font-mono text-[10px] uppercase tracking-wider2 px-3 py-2.5 text-faint hover:text-ink transition-colors"
+  }, "No thanks")));
+}
 function TourBar({
   step,
   setStep,
@@ -6356,6 +6461,115 @@ function ProfileView({
     className: "mt-7 font-mono text-[10px] uppercase tracking-wider2 px-5 py-3 bg-ink text-paper rounded-[2px] hover:tracking-[.26em] transition-all"
   }, "See the shelf, ordered for you \u2192")));
 }
+const EDGE = {
+  forced: {
+    out: 'Forced',
+    in: 'Forced by',
+    c: '#BB0000'
+  },
+  governs: {
+    out: 'Governs',
+    in: 'Only true under',
+    c: '#96720C'
+  },
+  informs: {
+    out: 'Led to',
+    in: 'Grew out of',
+    c: '#41647C'
+  }
+};
+function buildEdges(projects, shelf) {
+  const fwd = {},
+    rev = {};
+  const push = (m, k, v) => {
+    (m[k] = m[k] || []).push(v);
+  };
+  projects.forEach(p => p.log.forEach(e => (e.links || []).forEach(l => {
+    const target = resolveRef(l.to, projects, shelf);
+    if (!target) return;
+    push(fwd, e.id, {
+      ...l,
+      target
+    });
+    if (target.kind === 'entry') push(rev, target.e.id, {
+      ...l,
+      source: {
+        kind: 'entry',
+        e,
+        p
+      }
+    });
+  })));
+  return {
+    fwd,
+    rev
+  };
+}
+function resolveRef(ref, projects, shelf) {
+  if (ref.indexOf('shelf:') === 0) {
+    const s = shelf.find(x => x.id === ref.slice(6));
+    return s ? {
+      kind: 'shelf',
+      s
+    } : null;
+  }
+  for (const p of projects) {
+    const e = p.log.find(x => x.id === ref);
+    if (e) return {
+      kind: 'entry',
+      e,
+      p
+    };
+  }
+  return null;
+}
+function EdgeChips({
+  id,
+  edges,
+  project,
+  onEntry,
+  onShelf
+}) {
+  const out = edges.fwd[id] || [],
+    back = edges.rev[id] || [];
+  if (!out.length && !back.length) return null;
+  const Row = ({
+    dir,
+    list
+  }) => list.map((l, i) => {
+    const meta = EDGE[l.t];
+    const isOut = dir === 'out';
+    const node = isOut ? l.target : l.source;
+    const label = node.kind === 'shelf' ? node.s.name : node.e.h;
+    const away = node.kind === 'shelf' || node.p && project && node.p.id !== project.id;
+    return React.createElement("button", {
+      key: dir + i,
+      onClick: () => node.kind === 'shelf' ? onShelf(node.s.id) : onEntry(node.e.id, node.p),
+      className: "group/e flex items-start gap-2.5 text-left w-full py-1.5"
+    }, React.createElement("span", {
+      className: "font-mono text-[9px] uppercase tracking-wider2 px-1.5 py-[3px] rounded-[2px] shrink-0 mt-[1px]",
+      style: {
+        color: meta.c,
+        background: meta.c + '18'
+      }
+    }, isOut ? meta.out : meta.in), React.createElement("span", {
+      className: "text-[13px] leading-snug flex-1"
+    }, React.createElement("span", {
+      className: "u-hover group-hover/e:bg-[length:100%_1px]"
+    }, label), away && React.createElement("span", {
+      className: "font-mono text-[9px] uppercase tracking-wider2 text-faint ml-2"
+    }, node.kind === 'shelf' ? 'on the shelf' : node.p.code)));
+  });
+  return React.createElement("div", {
+    className: "mt-3 measure pl-3 border-l hair"
+  }, React.createElement(Row, {
+    dir: "in",
+    list: back
+  }), React.createElement(Row, {
+    dir: "out",
+    list: out
+  }));
+}
 function App() {
   const saved = useRef(loadState()).current;
   const route = useRef(readHash()).current;
@@ -6381,6 +6595,7 @@ function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [orient, setOrient] = useState(!saved && !route);
   const [tour, setTour] = useState(null);
+  const [tourDone, setTourDone] = useState(saved ? !!saved.tourDone : false);
   const lens = lensOf(me);
   const scoped = projects.filter(p => lens !== 'sup' ? true : me.scope === 'all' || (me.projects || []).includes(p.id));
   const shelfScoped = lens === 'sup' && me.scope !== 'all' ? shelf.filter(s => (me.projects || []).includes(s.parent) || s.shelvedBy === me.k) : shelf;
@@ -6411,11 +6626,12 @@ function App() {
       briefsMade,
       shared,
       profiles,
+      tourDone,
       meKey: me.k,
       view,
       peopleProjects
     });
-  }, [projects, shelf, nudged, checked, briefsMade, shared, profiles, me.k, view]);
+  }, [projects, shelf, nudged, checked, briefsMade, shared, profiles, tourDone, me.k, view]);
   useEffect(() => {
     const onHash = () => {
       const r = readHash();
@@ -6456,6 +6672,7 @@ function App() {
     });
   }
   function goTour(i) {
+    setTourDone(true);
     if (i === null || i === undefined) {
       setTour(null);
       return;
@@ -6663,6 +6880,7 @@ function App() {
     me,
     lens
   });
+  const edges = buildEdges(projects, shelf);
   const active = projects.find(p => p.id === activeId);
   const item = shelf.find(s => s.id === shelfId);
   const allDebt = scoped.flatMap(p => debts(p));
@@ -6688,7 +6906,8 @@ function App() {
     view: view,
     setView: setView,
     ticker: ticker,
-    openPalette: () => setPaletteOpen(true)
+    openPalette: () => setPaletteOpen(true),
+    openTour: () => goTour(0)
   }), React.createElement(Palette, {
     open: paletteOpen,
     setOpen: setPaletteOpen,
@@ -6704,6 +6923,9 @@ function App() {
     step: tour,
     setStep: goTour,
     onExit: () => setTour(null)
+  }), !orient && tour === null && !tourDone && React.createElement(TourOffer, {
+    onStart: () => goTour(0),
+    onDismiss: () => setTourDone(true)
   }), React.createElement("main", {
     id: "main"
   }, view === 'register' && React.createElement(SupRegister, {
@@ -6816,6 +7038,8 @@ function App() {
   }), view === 'project' && active && React.createElement(ProjectDetail, {
     p: active,
     me: me,
+    edges: edges,
+    openItem: openItem,
     back: () => {
       setActiveId(null);
       setView(lens === 'ug' ? 'projects' : 'register');
