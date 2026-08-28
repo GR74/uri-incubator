@@ -7,7 +7,7 @@ graduate mid-project, and what they tried, what failed, and why they chose one
 approach over another leaves with them. URI is one record — written when someone
 leaves, read when someone arrives.
 
-**Live:** _(add your deploy URL here)_
+**Live:** https://gr74.github.io/uri-incubator/
 
 ## What's in it
 
