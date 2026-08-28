@@ -689,9 +689,9 @@ const lensOf = me => me.tier === 'ug' ? 'ug' : me.tier === 'partner' ? 'partner'
 const HOME = { ug:'bench', sup:'register', partner:'partnerShelf' };
 const LENS_HOME = { ug:'priya', sup:'okonkwo', partner:'dana' };
 const TABS = {
-  ug: me => [['bench','My bench'],['shelf','The Shelf'],['projects','Projects'],['profile','About you'],['record','My record'],
+  ug: me => [['bench','My bench'],['shelf','The Shelf'],['projects','Projects'],['map','Map'],['profile','About you'],['record','My record'],
              [me.state==='incoming' ? 'starthere' : 'myhandoff', me.state==='incoming' ? 'Start here' : 'My handoff']],
-  sup: () => [['register','Register'],['risk','Continuity risk'],['handoffs','Handoffs'],['shelf','The Shelf'],['extract','Shelve a project']],
+  sup: () => [['register','Register'],['risk','Continuity risk'],['map','Map'],['handoffs','Handoffs'],['shelf','The Shelf'],['extract','Shelve a project']],
   partner: () => [['partnerShelf','Open projects'],['partnerTalent','Researchers']],
 };
 
@@ -2245,7 +2245,19 @@ function saveState(o){
   try { localStorage.setItem(STORE, JSON.stringify(o)); } catch (e) {}
 }
 function loadState(){
-  try { const raw = localStorage.getItem(STORE); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+  try {
+    const raw = localStorage.getItem(STORE);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    /* Saved state outlives the code that wrote it. Anything shaped wrong -- an
+       older release, a half-written record, a hand-edited value -- must fall
+       back to the seed rather than render a blank page. */
+    if (!o || !Array.isArray(o.projects) || !o.projects.length || !Array.isArray(o.shelf)) return null;
+    if (!o.projects.every(p => p && p.id && Array.isArray(p.log))) return null;
+    ['nudged','checked','briefsMade','shared'].forEach(k => { if (!Array.isArray(o[k])) o[k] = []; });
+    if (!o.profiles || typeof o.profiles !== 'object') o.profiles = {};
+    return o;
+  } catch (e) { return null; }
 }
 function clearState(){ try { localStorage.removeItem(STORE); } catch (e) {} }
 
@@ -4288,6 +4300,271 @@ function EdgeChips({ id, edges, project, onEntry, onShelf }){
   );
 }
 
+
+/* ════════════════════════════════════════════════════════════════════════════
+   THE MAP
+   A node-link view earns its place only if it answers something. This one
+   answers: where does the group's knowledge run through a single person?
+   Entries are deliberately not nodes -- 37 of them would produce a hairball
+   and hide the answer. People, projects and shelved work are the structure.
+   Layout is a seeded relaxation, so it is identical on every load.
+   ════════════════════════════════════════════════════════════════════════════ */
+const NODE_KIND = {
+  ug:      { c:'#4A4844', label:'Undergraduate' },
+  phd:     { c:'#41647C', label:'PhD mentor' },
+  pi:      { c:'#1A1917', label:'Principal investigator' },
+  alum:    { c:'#9C9A95', label:'Graduated' },
+  project: { c:'#96720C', label:'Project' },
+  shelf:   { c:'#BB0000', label:'On the shelf' },
+};
+
+function graphModel(projects, shelf){
+  const nodes = [], links = [];
+  const add = n => { nodes.push(n); return n; };
+  const byId = {};
+
+  projects.forEach(p => {
+    byId[p.id] = add({ id:p.id, kind:'project', label:p.name, short:p.code, sub:p.code,
+                       meta: p.log.length + ' entries', r: 13 + Math.min(11, p.log.length * 0.5) });
+  });
+  shelf.filter(s => !s.claimedBy).forEach(s => {
+    byId[s.id] = add({ id:s.id, kind:'shelf', label:s.name, short:s.code, sub:s.code,
+                       meta:'shelved by ' + byKey(s.shelvedBy).n, r:11 });
+  });
+
+  PEOPLE.forEach(x => {
+    const authored = projects.flatMap(p => p.log.filter(e => authorsOf(e).some(a => a.k === x.k)));
+    const owns = shelf.filter(s => !s.claimedBy && s.shelvedBy === x.k);
+    const onProj = projects.filter(p => (x.projects||[]).includes(p.id));
+    if (!authored.length && !owns.length && !onProj.length) return;
+    const n = byId[x.k] = add({ id:x.k, kind: x.tier === 'partner' ? 'ug' : x.tier,
+                                label:x.n, short: (x.s && x.s !== '—') ? x.s : x.n,
+                                sub:x.line, person:x, meta: pl(authored.length,'entry','entries'),
+                                r: 10 + Math.min(9, authored.length * 1.1) });
+    projects.forEach(p => {
+      const mine = p.log.filter(e => authorsOf(e).some(a => a.k === x.k));
+      const assigned = (x.projects||[]).includes(p.id);
+      if (!mine.length && !assigned) return;
+      const sole = mine.filter(e => PROCEDURAL.includes(e.t) && authorsOf(e).length === 1).length;
+      links.push({ a:n.id, b:p.id, w:mine.length, sole, kind:'authorship' });
+    });
+    owns.forEach(s => links.push({ a:n.id, b:s.id, w:1, sole:1, kind:'shelved' }));
+  });
+
+  shelf.filter(s => !s.claimedBy && byId[s.parent]).forEach(s =>
+    links.push({ a:s.parent, b:s.id, w:1, sole:0, kind:'spun-out' }));
+
+  return { nodes, links: links.filter(l => byId[l.a] && byId[l.b]), byId };
+}
+
+/* deterministic relaxation -- no randomness anywhere, so the map is the same
+   picture every time anyone opens it */
+function relax(nodes, links, W, H){
+  const N = nodes.length;
+  nodes.forEach((n, i) => {
+    const a = (i / N) * Math.PI * 2;
+    n.x = W/2 + Math.cos(a) * W * 0.33;
+    n.y = H/2 + Math.sin(a) * H * 0.35;
+  });
+  const idx = {}; nodes.forEach(n => idx[n.id] = n);
+  for (let step = 0; step < 460; step++){
+    const k = 1 - step / 460;
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++){
+      const a = nodes[i], b = nodes[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.sqrt(dx*dx + dy*dy) || 0.01;
+      const want = a.r + b.r + 86;
+      if (d < want){
+        const f = (want - d) * 0.5 * k;
+        const ux = dx/d, uy = dy/d;
+        a.x -= ux*f; a.y -= uy*f; b.x += ux*f; b.y += uy*f;
+      }
+    }
+    links.forEach(l => {
+      const a = idx[l.a], b = idx[l.b];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.sqrt(dx*dx + dy*dy) || 0.01;
+      const rest = 168 - Math.min(46, l.w * 5);
+      const f = (d - rest) * 0.05 * k;
+      const ux = dx/d, uy = dy/d;
+      a.x += ux*f; a.y += uy*f; b.x -= ux*f; b.y -= uy*f;
+    });
+    nodes.forEach(n => {
+      n.x += (W/2 - n.x) * 0.004 * k;
+      n.y += (H/2 - n.y) * 0.004 * k;
+      n.x = Math.max(n.r + 54, Math.min(W - n.r - 54, n.x));
+      n.y = Math.max(n.r + 22, Math.min(H - n.r - 30, n.y));
+    });
+  }
+  /* labels sit below by default; flip the ones that would collide */
+  const placed = [];
+  [...nodes].sort((p, q) => p.y - q.y).forEach(n => {
+    const w = n.short.length * 5.6, below = { x:n.x, y:n.y + n.r + 14, w };
+    const hits = box => placed.some(o =>
+      Math.abs(o.x - box.x) < (o.w + box.w) / 2 + 6 && Math.abs(o.y - box.y) < 13);
+    if (hits(below)) { n.above = true; placed.push({ x:n.x, y:n.y - n.r - 9, w }); }
+    else placed.push(below);
+  });
+  return nodes;
+}
+
+function MapView({ projects, shelf, me, open, openItem, openRecord }){
+  const W = 1000, H = 580;
+  const [hover, setHover] = useState(null);
+  const [gone, setGone] = useState([]);
+
+  const g = useMemo(() => {
+    const m = graphModel(projects, shelf);
+    relax(m.nodes, m.links, W, H);
+    return m;
+  }, [projects, shelf]);
+
+  const neighbours = useMemo(() => {
+    const n = {};
+    g.links.forEach(l => { (n[l.a] = n[l.a] || new Set()).add(l.b); (n[l.b] = n[l.b] || new Set()).add(l.a); });
+    return n;
+  }, [g]);
+
+  const lost = simulate(projects, shelf, gone);
+  const dim = id => hover && hover !== id && !(neighbours[hover] || new Set()).has(id);
+  const cut = id => gone.includes(id);
+  const linkCut = l => cut(l.a) || cut(l.b);
+
+  const LOAD = 2;
+  const soleLinks = g.links.filter(l => l.sole >= LOAD).length;
+
+  return (
+    <div className="max-w-[1240px] mx-auto px-8 pb-32">
+      <Plate tone="ink" ghost={g.nodes.length}
+        eyebrow="The map"
+        title="Everything the group knows, and who it runs through."
+        lede="People, projects and shelved work. A line is written evidence that someone touched something. A scarlet line is load-bearing: that person is the only written source for more than one procedure on that project."
+        figures={[
+          [g.nodes.length, 'things on the map'],
+          [g.links.length, 'connections'],
+          [soleLinks, soleLinks === 1 ? 'load-bearing link' : 'load-bearing links', 'two or more procedures each'],
+          [gone.length ? lost.orphaned.length : '—', 'orphaned by your selection'],
+        ]}
+      />
+
+      <PageIntro what="Click a person to take them out and watch what detaches. Hover anything to isolate what it touches. Nothing here is arranged by hand — the layout is derived from the log, and it is the same picture every time." />
+
+      {/* legend */}
+      <div className="flex items-center gap-x-6 gap-y-2 flex-wrap font-mono text-[10px] uppercase tracking-wider2 text-muted mb-4">
+        {['ug','phd','pi','alum','project','shelf'].map(k => (
+          <span key={k} className="flex items-center gap-2">
+            <span className="w-[11px] h-[11px] rounded-full" style={{ background:NODE_KIND[k].c }} />
+            {NODE_KIND[k].label}
+          </span>
+        ))}
+        <span className="flex items-center gap-2">
+          <span className="w-5 h-[2px]" style={{ background:'#BB0000' }} /> Load-bearing (2+ procedures only they wrote)
+        </span>
+      </div>
+
+      <div className="border hair rounded-[3px] bg-card overflow-x-auto">
+        <svg viewBox={'0 0 ' + W + ' ' + H} className="w-full block" style={{ minWidth:720 }}
+             role="img" aria-label="Map of people, projects and shelved work in the group">
+          {g.links.map((l, i) => {
+            const a = g.byId[l.a], b = g.byId[l.b];
+            const off = linkCut(l), sole = l.sole >= LOAD;
+            const faded = dim(l.a) && dim(l.b);
+            return (
+              <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                stroke={off ? '#BB0000' : sole ? '#BB0000' : '#C2C0BA'}
+                strokeWidth={off ? 2 : sole ? 1.6 : Math.min(3, 0.7 + l.w * 0.18)}
+                strokeDasharray={off ? '4 4' : l.kind === 'spun-out' ? '2 5' : 'none'}
+                strokeOpacity={faded ? 0.12 : off ? 0.95 : sole ? 0.75 : 0.5}
+                style={{ transition:'stroke-opacity .25s ease, stroke .25s ease' }} />
+            );
+          })}
+
+          {g.nodes.map(n => {
+            const K = NODE_KIND[n.kind];
+            const off = cut(n.id), faded = dim(n.id);
+            const isPerson = !!n.person;
+            return (
+              <g key={n.id} transform={'translate(' + n.x + ',' + n.y + ')'}
+                 style={{ cursor:'pointer', transition:'opacity .25s ease', opacity: faded ? 0.22 : 1 }}
+                 onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(null)}
+                 onClick={() => {
+                   if (isPerson) setGone(x => x.includes(n.id) ? x.filter(y => y !== n.id) : [...x, n.id]);
+                   else if (n.kind === 'project') open(n.id);
+                   else openItem(n.id);
+                 }}>
+                <circle r={n.r} fill={off ? '#F2F1EE' : K.c}
+                        stroke={off ? '#BB0000' : n.kind === 'alum' ? '#C2C0BA' : 'none'}
+                        strokeWidth={off ? 2 : 1}
+                        strokeDasharray={off ? '3 3' : 'none'} />
+                {isPerson && (
+                  <text textAnchor="middle" dy="3.5" className="font-mono"
+                        style={{ fontSize:9, fill: off ? '#BB0000' : '#F2F1EE', pointerEvents:'none' }}>
+                    {n.person.i}
+                  </text>
+                )}
+                <text textAnchor="middle" y={n.above ? -(n.r + 8) : n.r + 14} className="font-mono"
+                      style={{ fontSize:9.5, fill: hover === n.id ? '#1A1917' : '#6F6D69',
+                               letterSpacing:'.04em', pointerEvents:'none' }}>
+                  {n.short}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      <div className="mt-3 min-h-[38px] flex items-baseline gap-3 flex-wrap">
+        {hover && g.byId[hover] ? (
+          <>
+            <Tag>{g.byId[hover].sub}</Tag>
+            <span className="font-display text-[17px] leading-snug">{g.byId[hover].label}</span>
+            <span className="font-mono text-[10px] uppercase tracking-wider2 text-faint">
+              {NODE_KIND[g.byId[hover].kind].label} · {g.byId[hover].meta}
+            </span>
+          </>
+        ) : (
+          <span className="font-display italic text-[15px] text-faint">
+            Hover anything to read it. Click a person to take them out of the lab.
+          </span>
+        )}
+      </div>
+
+      {gone.length > 0 && (
+        <div className="mt-6 border hair rounded-[3px] bg-card px-6 py-5 rise" style={{ borderLeft:'3px solid #BB0000' }}>
+          <div className="flex items-start justify-between gap-6 flex-wrap">
+            <div>
+              <Kicker style={{ color:'#BB0000' }}>Taken off the map</Kicker>
+              <div className="font-display text-[20px] leading-snug mt-1.5">
+                {gone.map(k => byKey(k).n).join(', ')} removed — {pl(lost.orphaned.length,'procedure','procedures')} lose
+                {lost.orphaned.length === 1 ? 's' : ''} their only living author.
+              </div>
+            </div>
+            <button onClick={() => setGone([])}
+              className="font-mono text-[10px] uppercase tracking-wider2 px-3 py-1.5 border hair rounded-[2px] hover:border-ink transition-colors shrink-0">
+              Put everyone back
+            </button>
+          </div>
+          {lost.orphaned.length > 0 && (
+            <div className="mt-4 space-y-1.5">
+              {lost.orphaned.map(({ e, p }) => (
+                <div key={e.id} className="flex items-start gap-2.5">
+                  <Mark t={e.t} size={14} />
+                  <span className="text-[13px] leading-snug">{e.h}<span className="font-mono text-[10px] text-faint ml-2">{p.code}</span></span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <p className="text-[12.5px] text-muted leading-relaxed mt-6 measure">
+        The map is drawn from the log and nothing else. A person with several thin lines has spread what they
+        know across the group; a person carrying a scarlet line is a single point of failure with a graduation date.
+      </p>
+    </div>
+  );
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
    APP
    ──────────────────────────────────────────────────────────────────────────── */
@@ -4520,6 +4797,8 @@ function App(){
       {view === 'register'  && <SupRegister projects={scoped} me={me} open={open} goOnboard={goOnboard} />}
       {view === 'risk'      && <RiskView projects={scoped} shelf={shelfScoped} me={me} open={open} ack={ack} nudge={nudge} nudged={nudged} />}
       {view === 'handoffs'  && <HandoffsView projects={scoped} me={me} goOnboard={goOnboard} open={open} briefsMade={briefsMade} />}
+      {view === 'map'       && <MapView projects={scoped} shelf={shelfScoped} me={me}
+        open={open} openItem={openItem} openRecord={openRecord} />}
       {view === 'extract'   && <Extraction me={me} projects={projects} onPublish={publish} setView={setView} />}
 
       {view === 'shelf'     && <ShelfView shelf={shelfScoped} me={me} openItem={openItem} setView={setView} profile={myProfile} />}
