@@ -645,7 +645,7 @@ const lensOf = me => me.tier === 'ug' ? 'ug' : me.tier === 'partner' ? 'partner'
 const HOME = { ug:'bench', sup:'register', partner:'partnerShelf' };
 const LENS_HOME = { ug:'priya', sup:'okonkwo', partner:'dana' };
 const TABS = {
-  ug: me => [['bench','My bench'],['shelf','The Shelf'],['projects','Projects'],['record','My record'],
+  ug: me => [['bench','My bench'],['shelf','The Shelf'],['projects','Projects'],['profile','About you'],['record','My record'],
              [me.state==='incoming' ? 'starthere' : 'myhandoff', me.state==='incoming' ? 'Start here' : 'My handoff']],
   sup: () => [['register','Register'],['risk','Continuity risk'],['handoffs','Handoffs'],['shelf','The Shelf'],['extract','Shelve a project']],
   partner: () => [['partnerShelf','Open projects'],['partnerTalent','Researchers']],
@@ -666,14 +666,14 @@ function Masthead({ me, setMe, view, setView, ticker, openPalette }){
     <header className="sticky top-0 z-50 backdrop-blur-[8px]" style={{ background:'rgba(242,241,238,.9)' }}>
       <div className="max-w-[1240px] mx-auto px-8">
         <div className="flex items-start justify-between gap-x-6 gap-y-4 flex-wrap pt-7 pb-5">
-          <button onClick={() => setView(HOME[lens])} className="text-left group shrink-0">
+          <button onClick={() => setView(HOME[lens])} className="text-left group min-w-0 shrink">
             <div className="flex items-baseline gap-3">
               <span className="font-display text-[30px] leading-none tracking-mega font-medium">URI</span>
               <span className="hidden md:block font-display italic text-[15px] text-muted leading-none -translate-y-[1px]">
                 Undergraduate Research Incubator
               </span>
             </div>
-            <div className="mt-2 font-mono text-[10px] uppercase tracking-wider2 text-faint">
+            <div className="mt-2 font-mono text-[10px] uppercase tracking-wider2 text-faint leading-relaxed">
               Created by Ohio State Students · Prototype with sample data
             </div>
           </button>
@@ -2355,7 +2355,7 @@ const SHELF_SEED = [
   name:'Cell-free expression as a rapid pre-screen for PETase variants',
   field:'Protein Engineering', dept:'Chemical & Biomolecular Engineering',
   pi:'Dr. Marisol Okonkwo', shelvedBy:'yusuf', shelvedOn:'2026-06-02',
-  reason:'pivot', mode:'bench', weeks:14, level:'intro', visibility:'partner',
+  reason:'pivot', mode:'bench', weeks:14, level:'intro', visibility:'partner', requires:['safety','bsl2'],
   oneLine:'Skip the two-day purification: express PETase variants in a cell-free PURE system and read melting temperature straight from the reaction.',
   reasonText:'Nothing here failed. My committee wanted the FACS story finished first, and this became the thing I did on Fridays until I stopped having Fridays. It is four days from being a real method paper and I will not get to it.',
   built:[
@@ -2388,7 +2388,7 @@ const SHELF_SEED = [
   name:'Does running speed explain the deviance signal in V1?',
   field:'Computational Neuroscience', dept:'Neuroscience & Cognitive Science',
   pi:'Dr. Halvard Berg', shelvedBy:'bea', shelvedOn:'2026-07-14',
-  reason:'time', mode:'computational', weeks:10, level:'intro', visibility:'partner',
+  reason:'time', mode:'computational', weeks:10, level:'intro', visibility:'partner', requires:[],
   oneLine:'Every imaging session recorded wheel speed alongside the calcium data, and nobody has ever looked at it. Test whether locomotion accounts for the deviance response we are about to publish.',
   reasonText:'This is three focused days of analysis and I have not had three focused days in fourteen months. It is not hard, it is not risky, and it is sitting in a folder. It also happens to be the first question a reviewer will ask, so I would rather we answered it than them.',
   built:[
@@ -2420,7 +2420,7 @@ const SHELF_SEED = [
   name:'Does freeze–thaw fragment estuarine microplastics before we count them?',
   field:'Environmental Engineering', dept:'Civil & Environmental Engineering',
   pi:'Dr. Elena Vasquez-Moreau', shelvedBy:'ellery', shelvedOn:'2025-05-10',
-  reason:'graduated', mode:'bench', weeks:20, level:'mid', visibility:'internal',
+  reason:'graduated', mode:'bench', weeks:20, level:'mid', visibility:'internal', requires:['safety'],
   oneLine:'Every archived sample was frozen before counting. If freezing breaks particles, every microplastic count in the field — not just ours — is biased high.',
   reasonText:'I graduated. I raised this at my last lab meeting, everyone agreed it mattered, and then there was nobody to do it. The archive still exists, for now.',
   built:[
@@ -2478,12 +2478,13 @@ function readGrade(n){ return n >= 80 ? 'Ready now' : n >= 62 ? 'Revivable' : n 
 function shelfDays(s){ return daysUntil(s.shelfLife.date); }
 
 /* ── the catalog card ──────────────────────────────────────────────────────── */
-function ShelfCard({ s, i, onOpen, me }){
+function ShelfCard({ s, i, onOpen, me, profile }){
   const r = readiness(s);
   const owner = byKey(s.shelvedBy);
   const R = REASONS[s.reason];
   const days = shelfDays(s);
   const urgent = days < 200;
+  const missing = profile && profile.done ? (s.requires||[]).filter(r => !(profile.certs||[]).includes(r)) : [];
   return (
     <button onClick={onOpen}
       className="group text-left bg-card border hair rounded-[3px] p-0 overflow-hidden lift rise flex flex-col"
@@ -2504,6 +2505,10 @@ function ShelfCard({ s, i, onOpen, me }){
           <span className="font-mono text-[9.5px] uppercase tracking-wider2 text-faint">
             {s.mode === 'computational' ? 'Computational' : s.mode === 'both' ? 'Bench + code' : 'Bench'}
           </span>
+          {missing.map(c => (
+            <span key={c} className="font-mono text-[9.5px] uppercase tracking-wider2 px-1.5 py-[2px] rounded-[2px]"
+                  style={{ color:'#96720C', background:'rgba(150,114,12,.14)' }}>needs {CERTS[c].label.split(' ')[0]}</span>
+          ))}
         </div>
 
         <h3 className="font-display text-[21px] leading-[1.2] mt-3"><span className="u-hover">{s.name}</span></h3>
@@ -2543,13 +2548,15 @@ function ShelfCard({ s, i, onOpen, me }){
 }
 
 /* ── browse ────────────────────────────────────────────────────────────────── */
-function ShelfView({ shelf, me, openItem, setView }){
+function ShelfView({ shelf, me, openItem, setView, profile }){
   const [mode, setMode] = useState('all');
   const [sort, setSort] = useState('ready');
   const sup = me.tier !== 'ug';
   const shown = shelf.filter(s => !s.claimedBy)
     .filter(s => mode === 'all' || s.mode === mode || (mode==='bench' && s.mode==='both') || (mode==='computational' && s.mode==='both'))
-    .sort((a,b) => sort === 'ready' ? readiness(b).score - readiness(a).score : shelfDays(a) - shelfDays(b));
+    .sort((a,b) => sort === 'fit' && profile && profile.done ? fitScore(b, profile) - fitScore(a, profile)
+                 : sort === 'ready' ? readiness(b).score - readiness(a).score
+                 : shelfDays(a) - shelfDays(b));
   const claimed = shelf.filter(s => s.claimedBy);
 
   return (
@@ -2580,7 +2587,8 @@ function ShelfView({ shelf, me, openItem, setView }){
         </div>
         <div className="flex items-center gap-3">
           <Kicker>Sort</Kicker>
-          {[['ready','Most ready'],['closing','Closing soonest']].map(([k,l]) => (
+          {(profile && profile.done ? [['fit','For you'],['ready','Most ready'],['closing','Closing soonest']]
+                                    : [['ready','Most ready'],['closing','Closing soonest']]).map(([k,l]) => (
             <button key={k} onClick={() => setSort(k)}
               className={'font-mono text-[10px] uppercase tracking-wider2 transition-colors ' +
                 (sort===k ? 'text-ink border-b border-ink pb-0.5' : 'text-faint hover:text-ink2')}>{l}</button>
@@ -2589,7 +2597,7 @@ function ShelfView({ shelf, me, openItem, setView }){
       </div>
 
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {shown.map((s,i) => <ShelfCard key={s.id} s={s} i={i} me={me} onOpen={() => openItem(s.id)} />)}
+        {shown.map((s,i) => <ShelfCard key={s.id} s={s} i={i} me={me} profile={profile} onOpen={() => openItem(s.id)} />)}
       </div>
 
       {sup && (
@@ -3763,6 +3771,350 @@ function TourBar({ step, setStep, onExit }){
   );
 }
 
+
+/* ════════════════════════════════════════════════════════════════════════════
+   THE PERSON MODEL
+   Ask only for what no log can observe -- time, eligibility, intent. Derive the
+   rest from entries the student already wrote, show what was derived, and let
+   them correct it. A declared skills form would contradict the whole product.
+   ════════════════════════════════════════════════════════════════════════════ */
+const CERTS = {
+  safety: { label:'General lab safety',      hours:1, note:'Required to be in any wet lab unsupervised.' },
+  bsl2:   { label:'BSL-2 biosafety',         hours:2, note:'Recombinant organisms, including routine E. coli work.' },
+  iacuc:  { label:'IACUC animal handling',   hours:2, note:'Any procedure involving vertebrate animals.' },
+  irb:    { label:'IRB human subjects',      hours:2, note:'Any data collected from people.' },
+  rad:    { label:'Radiation safety',        hours:3, note:'Sealed sources and radiolabelled reagents.' },
+};
+const GOALS = {
+  paper:  'A paper or a poster',
+  thesis: 'A senior thesis',
+  breadth:'A range of techniques',
+  decide: 'To find out whether research is for me',
+  grad:   'A grad school application',
+  med:    'A medical school application',
+};
+const LIMITS = {
+  'no-animal':  'No animal work',
+  'no-early':   'No early mornings',
+  'computational':'Computational only',
+  'term-only':  'Term time only, not summer',
+};
+const BLANK_PROFILE = { hours:8, grad:'', certs:[], prior:'', goals:[], limits:[], confirms:{}, done:false };
+
+/* what the log already knows -- no form required */
+function derived(person, projects){
+  const methods = [];
+  projects.forEach(p => p.log.forEach(e => {
+    if (e.t === 'method' && authorsOf(e).some(a => a.k === person.k)) methods.push({ e, p });
+  }));
+  const touched = projects.filter(p => p.log.some(e => authorsOf(e).some(a => a.k === person.k))
+                                    || (person.projects||[]).includes(p.id));
+  const entries = projects.flatMap(p => p.log.filter(e => authorsOf(e).some(a => a.k === person.k)));
+  return { methods, touched, entries,
+           deadends: entries.filter(e => e.t === 'deadend').length,
+           signed:   entries.filter(e => e.ack === true).length };
+}
+
+/* eligibility is a hard gate, not a preference -- exactly the sort of constraint
+   a symbolic layer should own */
+function eligibility(profile, shelf){
+  const held = new Set(profile.certs || []);
+  const open = [], locked = [];
+  shelf.filter(s => !s.claimedBy).forEach(s => {
+    const missing = (s.requires || []).filter(r => !held.has(r));
+    (missing.length ? locked : open).push({ s, missing });
+  });
+  const byCert = {};
+  locked.forEach(({ s, missing }) => missing.forEach(c => {
+    byCert[c] = byCert[c] || [];
+    byCert[c].push(s);
+  }));
+  return { open, locked, byCert };
+}
+
+/* ranking only -- nothing is ever hidden from a student */
+function fitScore(s, profile){
+  let n = 50;
+  const termWeeks = Math.max(4, (profile.hours || 8) * 1.6);
+  n += s.weeks <= termWeeks ? 12 : -6;
+  if ((profile.limits||[]).includes('computational') && s.mode !== 'computational') n -= 22;
+  if ((profile.limits||[]).includes('no-animal') && /mouse|animal|surgery/i.test(s.name + s.oneLine)) n -= 25;
+  if ((profile.goals||[]).includes('breadth')) n += s.learn.length * 2;
+  if ((profile.goals||[]).includes('paper') && /write|methods note|manuscript/i.test(JSON.stringify(s.remaining))) n += 10;
+  if ((profile.goals||[]).includes('decide') && s.level === 'intro') n += 10;
+  const missing = (s.requires || []).filter(r => !(profile.certs||[]).includes(r)).length;
+  n -= missing * 15;
+  return n;
+}
+
+function Chips({ options, value, onChange, multi=true }){
+  return (
+    <div className="flex flex-wrap gap-2">
+      {Object.entries(options).map(([k, label]) => {
+        const on = multi ? value.includes(k) : value === k;
+        return (
+          <button key={k} type="button" aria-pressed={on}
+            onClick={() => onChange(multi ? (on ? value.filter(x => x !== k) : [...value, k]) : k)}
+            className={'text-[13px] px-3.5 py-2 rounded-[3px] border transition-all ' +
+              (on ? 'bg-ink text-paper border-ink' : 'hair hover:border-rule2')}>{label}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── intake: three minutes, once ─────────────────────────────────────────── */
+function Intake({ me, profile, setProfile, onDone }){
+  const p = profile;
+  const set = (k, v) => setProfile({ ...p, [k]: v });
+  const ok = p.hours > 0 && p.goals.length > 0;
+
+  return (
+    <div className="max-w-[1240px] mx-auto px-8 pb-32">
+      <Plate tone="warm" eyebrow="Set up" ghost="1"
+        title="Five questions the log cannot answer for you."
+        lede="Everything else is worked out from what you write as you go. This is only the part no record can observe: how much time you have, what you are allowed to do, and what you want out of it." />
+
+      <div className="mt-10 max-w-[760px] space-y-11">
+        <section>
+          <h2 className="font-display text-[22px]">How much time do you have?</h2>
+          <p className="text-[13px] text-muted mt-1.5">Used to size projects, not to judge you. Be realistic about a bad week.</p>
+          <div className="flex items-center gap-4 mt-5 flex-wrap">
+            <input type="range" min="2" max="30" value={p.hours} onChange={e => set('hours', +e.target.value)}
+              className="w-[260px]" aria-label="Hours per week" />
+            <span className="font-display text-[30px] leading-none font-light tnum">{p.hours}</span>
+            <span className="font-mono text-[10px] uppercase tracking-wider2 text-muted">hours per week</span>
+          </div>
+          <div className="mt-6 max-w-[260px]">
+            <Kicker className="mb-2">Expected graduation</Kicker>
+            <input type="date" value={p.grad} onChange={e => set('grad', e.target.value)}
+              className="w-full bg-transparent border-b hair pb-2 text-[14px] focus:border-ink transition-colors" />
+          </div>
+        </section>
+
+        <section>
+          <h2 className="font-display text-[22px]">What training do you already have?</h2>
+          <p className="text-[13px] text-muted mt-1.5 measure">
+            These are hard gates, not preferences — a project either requires one or it does not.
+            Checking them here is what opens projects to you.
+          </p>
+          <div className="mt-5 space-y-2.5">
+            {Object.entries(CERTS).map(([k, c]) => {
+              const on = p.certs.includes(k);
+              return (
+                <button key={k} type="button" aria-pressed={on}
+                  onClick={() => set('certs', on ? p.certs.filter(x => x !== k) : [...p.certs, k])}
+                  className={'w-full text-left flex items-start gap-3.5 px-4 py-3 rounded-[3px] border transition-all ' +
+                    (on ? 'border-ink' : 'hair hover:border-rule2')}
+                  style={on ? { background:'rgba(74,72,68,.06)' } : {}}>
+                  <span className="mt-[2px] w-[18px] h-[18px] rounded-[3px] border grid place-items-center shrink-0"
+                    style={{ borderColor: on ? '#4A4844' : '#C2C0BA', background: on ? '#4A4844' : 'transparent', color:'#F2F1EE' }}>
+                    {on && <span className="text-[11px] leading-none">✓</span>}
+                  </span>
+                  <span className="flex-1">
+                    <span className="block text-[14px]">{c.label}</span>
+                    <span className="block text-[12.5px] text-muted leading-snug mt-0.5">{c.note}</span>
+                  </span>
+                  <span className="font-mono text-[9.5px] uppercase tracking-wider2 text-faint shrink-0 mt-1">{c.hours}h course</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="font-display text-[22px]">What do you want out of this?</h2>
+          <p className="text-[13px] text-muted mt-1.5">This changes what counts as a good project far more than your skills do.</p>
+          <div className="mt-5"><Chips options={GOALS} value={p.goals} onChange={v => set('goals', v)} /></div>
+        </section>
+
+        <section>
+          <h2 className="font-display text-[22px]">Anything that rules a project out?</h2>
+          <div className="mt-5"><Chips options={LIMITS} value={p.limits} onChange={v => set('limits', v)} /></div>
+        </section>
+
+        <section>
+          <h2 className="font-display text-[22px]">Anything you have done elsewhere?</h2>
+          <p className="text-[13px] text-muted mt-1.5 measure">
+            A course, a summer job, another lab. Two lines is plenty — this is the only part of your
+            background that is genuinely invisible to us.
+          </p>
+          <textarea rows={3} value={p.prior} onChange={e => set('prior', e.target.value)}
+            placeholder="Took organic chem lab, spent a summer doing water sampling…"
+            className="w-full mt-4 bg-transparent border-b hair pb-2 text-[14px] leading-relaxed placeholder:text-faint focus:border-ink transition-colors resize-none" />
+        </section>
+
+        <div className="flex items-center gap-4 pt-6 dbl flex-wrap">
+          <button disabled={!ok} onClick={() => { setProfile({ ...p, done:true }); onDone(); }}
+            className={'font-mono text-[10px] uppercase tracking-wider2 px-5 py-3 rounded-[2px] transition-all ' +
+              (ok ? 'bg-ink text-paper hover:tracking-[.26em]' : 'bg-rule/60 text-faint cursor-not-allowed')}>
+            Save and see what opens up
+          </button>
+          <span className="text-[12px] text-faint">You can change any of this later. Nothing here is permanent.</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── the living profile ──────────────────────────────────────────────────── */
+function ProfileView({ me, projects, shelf, profile, setProfile, openItem, open, setView }){
+  const p = profile;
+  if (!p.done) return <Intake me={me} profile={p} setProfile={setProfile} onDone={() => window.scrollTo({top:0})} />;
+
+  const d = derived(me, projects);
+  const el = eligibility(p, shelf);
+  const confirm = (id, v) => setProfile({ ...p, confirms:{ ...p.confirms, [id]:v } });
+  const CONF = { yes:'Comfortable', rusty:'Rusty', no:'Not really' };
+
+  return (
+    <div className="max-w-[1240px] mx-auto px-8 pb-32">
+      <Plate variant="rule" eyebrow="About you" ghost={d.entries.length}
+        title="What we know, and how we know it."
+        lede="Almost none of this was typed in. It is read off the entries you have written, which is why it stays true as you work. Correct anything that is wrong — the corrections are what make it yours."
+        figures={[
+          [el.open.length, el.open.length === 1 ? 'project open to you' : 'projects open to you'],
+          [d.methods.length, d.methods.length === 1 ? 'procedure you documented' : 'procedures you documented'],
+          [p.hours, 'hours a week'],
+          [d.entries.length, d.entries.length === 1 ? 'entry on your record' : 'entries on your record'],
+        ]}
+      />
+
+      {/* what the log says about you */}
+      <section className="mt-14">
+        <div className="flex items-baseline justify-between gap-4 flex-wrap">
+          <h2 className="font-display text-[26px]">Read off your entries</h2>
+          <span className="font-mono text-[10px] uppercase tracking-wider2 text-faint">Derived · correct anything wrong</span>
+        </div>
+        {d.methods.length === 0 ? (
+          <p className="font-display italic text-[16px] text-muted mt-5 measure">
+            Nothing yet — which is exactly right if you have just started. This fills in on its own as you
+            file entries, and you never have to come back and update it.
+          </p>
+        ) : (
+          <div className="mt-6 space-y-3">
+            {d.methods.map(({ e, p: proj }) => {
+              const v = p.confirms[e.id];
+              return (
+                <div key={e.id} className="border hair rounded-[3px] bg-card px-5 py-4 flex items-start gap-5 flex-wrap">
+                  <div className="flex-1 min-w-[22ch]">
+                    <div className="text-[14.5px] leading-snug">
+                      We have you down as comfortable with <span className="font-display italic">{e.h.replace(/^The /,'').toLowerCase()}</span>.
+                    </div>
+                    <div className="font-mono text-[10px] text-faint mt-1.5">
+                      Because you wrote it · {proj.code} · {fmt(e.d)}
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    {Object.entries(CONF).map(([k, label]) => (
+                      <button key={k} onClick={() => confirm(e.id, k)} aria-pressed={v === k}
+                        className={'font-mono text-[9.5px] uppercase tracking-wider2 px-2.5 py-1.5 rounded-[2px] border transition-all ' +
+                          (v === k ? 'bg-ink text-paper border-ink' : 'hair hover:border-rule2')}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* eligibility -- the payoff */}
+      <section className="mt-14">
+        <h2 className="font-display text-[26px]">What your training opens</h2>
+        <p className="text-[13.5px] text-muted mt-2 measure">
+          Certifications are the one hard gate in the system. Nothing is hidden from you — locked projects
+          still appear on the shelf, marked, so you can see what a couple of hours would buy.
+        </p>
+
+        <div className="mt-6 grid md:grid-cols-2 gap-5">
+          <div className="border hair rounded-[3px] bg-card p-6" style={{ borderLeft:'3px solid #4A4844' }}>
+            <div className="font-display text-[40px] leading-none font-light tnum">{el.open.length}</div>
+            <div className="font-mono text-[9.5px] uppercase tracking-wider2 text-muted mt-2">open to you right now</div>
+            {el.open.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {el.open.slice(0,3).map(({ s }) => (
+                  <button key={s.id} onClick={() => openItem(s.id)} className="group block text-left w-full">
+                    <span className="text-[13.5px] leading-snug u-hover">{s.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="border hair rounded-[3px] bg-card p-6" style={{ borderLeft:'3px solid #96720C' }}>
+            <div className="font-display text-[40px] leading-none font-light tnum" style={{ color: el.locked.length ? '#96720C' : '#9C9A95' }}>
+              {el.locked.length}
+            </div>
+            <div className="font-mono text-[9.5px] uppercase tracking-wider2 text-muted mt-2">waiting on a certification</div>
+            {Object.keys(el.byCert).length === 0 ? (
+              <p className="text-[13px] text-muted mt-4">Nothing is gated for you.</p>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {Object.entries(el.byCert).map(([c, list]) => (
+                  <div key={c} className="flex items-start gap-3">
+                    <span className="font-mono text-[9.5px] uppercase tracking-wider2 px-1.5 py-[3px] rounded-[2px] shrink-0 mt-[1px]"
+                          style={{ color:'#96720C', background:'rgba(150,114,12,.14)' }}>{CERTS[c].hours}h</span>
+                    <span className="text-[13.5px] leading-snug">
+                      <span className="font-display italic">{CERTS[c].label}</span> would open {pl(list.length,'project','projects')}.
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* what you told us */}
+      <section className="mt-14">
+        <div className="flex items-baseline justify-between gap-4 flex-wrap">
+          <h2 className="font-display text-[26px]">What you told us</h2>
+          <button onClick={() => setProfile({ ...p, done:false })}
+            className="font-mono text-[10px] uppercase tracking-wider2 px-3 py-1.5 border hair rounded-[2px] hover:border-ink transition-colors">
+            Edit
+          </button>
+        </div>
+        <div className="mt-5 grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[['Time', p.hours + ' hours a week'],
+            ['Graduating', p.grad ? fmt(p.grad) : 'not set'],
+            ['Training', p.certs.length ? p.certs.map(c => CERTS[c].label).join(', ') : 'none recorded'],
+            ['Looking for', p.goals.map(g => GOALS[g]).join(', ') || '—']].map(([k, v]) => (
+            <div key={k}><Kicker>{k}</Kicker><div className="text-[14px] mt-1.5 leading-snug">{v}</div></div>
+          ))}
+        </div>
+        {p.prior && (
+          <div className="mt-6"><Kicker>Experience elsewhere</Kicker>
+            <p className="text-[14px] leading-relaxed mt-1.5 measure">{p.prior}</p></div>
+        )}
+        {p.limits.length > 0 && (
+          <div className="mt-6"><Kicker>Ruled out</Kicker>
+            <p className="text-[14px] mt-1.5">{p.limits.map(l => LIMITS[l]).join(' · ')}</p></div>
+        )}
+      </section>
+
+      <section className="mt-14 border-t hair pt-8">
+        <h2 className="font-display text-[22px]">How this is used</h2>
+        <div className="mt-4 space-y-2.5 measure">
+          {['The shelf is reordered for you, never filtered. Everything stays visible, and anything gated says so.',
+            'Your brief expands the parts you have not done before and stays short on the parts you have.',
+            'Dead ends are always shown in full, whatever your profile says. A failure record is never something you are judged ready for.',
+           ].map(t => (
+            <div key={t} className="flex items-start gap-3">
+              <span className="w-[5px] h-[5px] rounded-full shrink-0 mt-[8px]" style={{ background:'#4A4844' }} />
+              <p className="text-[13.5px] leading-relaxed text-ink2">{t}</p>
+            </div>
+          ))}
+        </div>
+        <button onClick={() => setView('shelf')}
+          className="mt-7 font-mono text-[10px] uppercase tracking-wider2 px-5 py-3 bg-ink text-paper rounded-[2px] hover:tracking-[.26em] transition-all">
+          See the shelf, ordered for you →
+        </button>
+      </section>
+    </div>
+  );
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
    APP
    ──────────────────────────────────────────────────────────────────────────── */
@@ -3787,6 +4139,7 @@ function App(){
   const [checked, setChecked] = useState(saved ? saved.checked : []);
   const [briefsMade, setBriefsMade] = useState(saved ? saved.briefsMade : []);
   const [shared, setShared] = useState(saved ? saved.shared : ['amara']);
+  const [profiles, setProfiles] = useState(saved && saved.profiles ? saved.profiles : {});
   const [paletteOpen, setPaletteOpen] = useState(false);
   /* first-time visitors get the orientation; a deep link never interrupts */
   const [orient, setOrient] = useState(!saved && !route);
@@ -3805,8 +4158,8 @@ function App(){
   useEffect(() => {
     const peopleProjects = {};
     PEOPLE.forEach(x => { if (x.projects) peopleProjects[x.k] = x.projects; });
-    saveState({ projects, shelf, nudged, checked, briefsMade, shared, meKey:me.k, view, peopleProjects });
-  }, [projects, shelf, nudged, checked, briefsMade, shared, me.k, view]);
+    saveState({ projects, shelf, nudged, checked, briefsMade, shared, profiles, meKey:me.k, view, peopleProjects });
+  }, [projects, shelf, nudged, checked, briefsMade, shared, profiles, me.k, view]);
 
   /* a deep link pasted into an already-open tab must actually navigate */
   useEffect(() => {
@@ -3863,6 +4216,8 @@ function App(){
   const toggleCheck = id => setChecked(c => c.includes(id) ? c.filter(x => x!==id) : [...c, id]);
   const onMade = pid => setBriefsMade(b => b.includes(pid) ? b : [...b, pid]);
   const toggleShare = k => setShared(a => a.includes(k) ? a.filter(x => x!==k) : [...a, k]);
+  const myProfile = { ...BLANK_PROFILE, ...(profiles[me.k] || {}) };
+  const setMyProfile = v => setProfiles(o => ({ ...o, [me.k]: v }));
 
   function addEntry(pid, e, author){
     setProjects(ps => ps.map(p => p.id !== pid ? p : ({ ...p, log:[...p.log, {
@@ -3988,7 +4343,7 @@ function App(){
       {view === 'handoffs'  && <HandoffsView projects={scoped} me={me} goOnboard={goOnboard} open={open} briefsMade={briefsMade} />}
       {view === 'extract'   && <Extraction me={me} projects={projects} onPublish={publish} setView={setView} />}
 
-      {view === 'shelf'     && <ShelfView shelf={shelfScoped} me={me} openItem={openItem} setView={setView} />}
+      {view === 'shelf'     && <ShelfView shelf={shelfScoped} me={me} openItem={openItem} setView={setView} profile={myProfile} />}
       {view === 'shelfitem' && item && (
         <RevivalBrief s={item} me={me} back={() => setView(lens === 'partner' ? 'partnerShelf' : 'shelf')}
           onClaim={claim} redacted={lens === 'partner'} />
@@ -4006,6 +4361,10 @@ function App(){
       )}
       {view === 'myhandoff' && <MyHandoff projects={projects} me={me} open={open} goOnboard={goOnboard} checked={checked} toggleCheck={toggleCheck} briefsMade={briefsMade} onMade={onMade} />}
       {view === 'starthere' && <Onboarding projects={projects} me={me} auto openProject={open} onMade={onMade} />}
+      {view === 'profile'   && (
+        <ProfileView me={me} projects={projects} shelf={shelfScoped} profile={myProfile}
+          setProfile={setMyProfile} openItem={openItem} open={open} setView={setView} />
+      )}
       {view === 'record'    && (
         <RecordView projects={projects} shelf={shelf} me={me} who={recordOf ? byKey(recordOf) : null} openRecord={openRecord}
           shared={shared} toggleShare={toggleShare} open={lens === 'partner' ? null : open}

@@ -1617,7 +1617,7 @@ const LENS_HOME = {
   partner: 'dana'
 };
 const TABS = {
-  ug: me => [['bench', 'My bench'], ['shelf', 'The Shelf'], ['projects', 'Projects'], ['record', 'My record'], [me.state === 'incoming' ? 'starthere' : 'myhandoff', me.state === 'incoming' ? 'Start here' : 'My handoff']],
+  ug: me => [['bench', 'My bench'], ['shelf', 'The Shelf'], ['projects', 'Projects'], ['profile', 'About you'], ['record', 'My record'], [me.state === 'incoming' ? 'starthere' : 'myhandoff', me.state === 'incoming' ? 'Start here' : 'My handoff']],
   sup: () => [['register', 'Register'], ['risk', 'Continuity risk'], ['handoffs', 'Handoffs'], ['shelf', 'The Shelf'], ['extract', 'Shelve a project']],
   partner: () => [['partnerShelf', 'Open projects'], ['partnerTalent', 'Researchers']]
 };
@@ -1648,7 +1648,7 @@ function Masthead({
     className: "flex items-start justify-between gap-x-6 gap-y-4 flex-wrap pt-7 pb-5"
   }, React.createElement("button", {
     onClick: () => setView(HOME[lens]),
-    className: "text-left group shrink-0"
+    className: "text-left group min-w-0 shrink"
   }, React.createElement("div", {
     className: "flex items-baseline gap-3"
   }, React.createElement("span", {
@@ -1656,7 +1656,7 @@ function Masthead({
   }, "URI"), React.createElement("span", {
     className: "hidden md:block font-display italic text-[15px] text-muted leading-none -translate-y-[1px]"
   }, "Undergraduate Research Incubator")), React.createElement("div", {
-    className: "mt-2 font-mono text-[10px] uppercase tracking-wider2 text-faint"
+    className: "mt-2 font-mono text-[10px] uppercase tracking-wider2 text-faint leading-relaxed"
   }, "Created by Ohio State Students \u00b7 Prototype with sample data")), React.createElement("div", {
     className: "flex items-center gap-3 min-w-0 max-w-full"
   }, React.createElement("div", {
@@ -3946,6 +3946,7 @@ const SHELF_SEED = [{
   weeks: 14,
   level: 'intro',
   visibility: 'partner',
+  requires: ['safety', 'bsl2'],
   oneLine: 'Skip the two-day purification: express PETase variants in a cell-free PURE system and read melting temperature straight from the reaction.',
   reasonText: 'Nothing here failed. My committee wanted the FACS story finished first, and this became the thing I did on Fridays until I stopped having Fridays. It is four days from being a real method paper and I will not get to it.',
   built: [{
@@ -4020,6 +4021,7 @@ const SHELF_SEED = [{
   weeks: 10,
   level: 'intro',
   visibility: 'partner',
+  requires: [],
   oneLine: 'Every imaging session recorded wheel speed alongside the calcium data, and nobody has ever looked at it. Test whether locomotion accounts for the deviance response we are about to publish.',
   reasonText: 'This is three focused days of analysis and I have not had three focused days in fourteen months. It is not hard, it is not risky, and it is sitting in a folder. It also happens to be the first question a reviewer will ask, so I would rather we answered it than them.',
   built: [{
@@ -4089,6 +4091,7 @@ const SHELF_SEED = [{
   weeks: 20,
   level: 'mid',
   visibility: 'internal',
+  requires: ['safety'],
   oneLine: 'Every archived sample was frozen before counting. If freezing breaks particles, every microplastic count in the field \u2014 not just ours \u2014 is biased high.',
   reasonText: 'I graduated. I raised this at my last lab meeting, everyone agreed it mattered, and then there was nobody to do it. The archive still exists, for now.',
   built: [{
@@ -4188,13 +4191,15 @@ function ShelfCard({
   s,
   i,
   onOpen,
-  me
+  me,
+  profile
 }) {
   const r = readiness(s);
   const owner = byKey(s.shelvedBy);
   const R = REASONS[s.reason];
   const days = shelfDays(s);
   const urgent = days < 200;
+  const missing = profile && profile.done ? (s.requires || []).filter(r => !(profile.certs || []).includes(r)) : [];
   return React.createElement("button", {
     onClick: onOpen,
     className: "group text-left bg-card border hair rounded-[3px] p-0 overflow-hidden lift rise flex flex-col",
@@ -4223,7 +4228,14 @@ function ShelfCard({
     }
   }, R.label), React.createElement("span", {
     className: "font-mono text-[9.5px] uppercase tracking-wider2 text-faint"
-  }, s.mode === 'computational' ? 'Computational' : s.mode === 'both' ? 'Bench + code' : 'Bench')), React.createElement("h3", {
+  }, s.mode === 'computational' ? 'Computational' : s.mode === 'both' ? 'Bench + code' : 'Bench'), missing.map(c => React.createElement("span", {
+    key: c,
+    className: "font-mono text-[9.5px] uppercase tracking-wider2 px-1.5 py-[2px] rounded-[2px]",
+    style: {
+      color: '#96720C',
+      background: 'rgba(150,114,12,.14)'
+    }
+  }, "needs ", CERTS[c].label.split(' ')[0]))), React.createElement("h3", {
     className: "font-display text-[21px] leading-[1.2] mt-3"
   }, React.createElement("span", {
     className: "u-hover"
@@ -4272,12 +4284,13 @@ function ShelfView({
   shelf,
   me,
   openItem,
-  setView
+  setView,
+  profile
 }) {
   const [mode, setMode] = useState('all');
   const [sort, setSort] = useState('ready');
   const sup = me.tier !== 'ug';
-  const shown = shelf.filter(s => !s.claimedBy).filter(s => mode === 'all' || s.mode === mode || mode === 'bench' && s.mode === 'both' || mode === 'computational' && s.mode === 'both').sort((a, b) => sort === 'ready' ? readiness(b).score - readiness(a).score : shelfDays(a) - shelfDays(b));
+  const shown = shelf.filter(s => !s.claimedBy).filter(s => mode === 'all' || s.mode === mode || mode === 'bench' && s.mode === 'both' || mode === 'computational' && s.mode === 'both').sort((a, b) => sort === 'fit' && profile && profile.done ? fitScore(b, profile) - fitScore(a, profile) : sort === 'ready' ? readiness(b).score - readiness(a).score : shelfDays(a) - shelfDays(b));
   const claimed = shelf.filter(s => s.claimedBy);
   return React.createElement("div", {
     className: "max-w-[1240px] mx-auto px-8 pb-32"
@@ -4300,7 +4313,7 @@ function ShelfView({
     className: 'font-mono text-[10px] uppercase tracking-wider2 px-2.5 py-1 rounded-[2px] transition-colors ' + (mode === k ? 'bg-ink text-paper' : 'text-faint hover:text-ink2 hover:bg-rule/40')
   }, l))), React.createElement("div", {
     className: "flex items-center gap-3"
-  }, React.createElement(Kicker, null, "Sort"), [['ready', 'Most ready'], ['closing', 'Closing soonest']].map(([k, l]) => React.createElement("button", {
+  }, React.createElement(Kicker, null, "Sort"), (profile && profile.done ? [['fit', 'For you'], ['ready', 'Most ready'], ['closing', 'Closing soonest']] : [['ready', 'Most ready'], ['closing', 'Closing soonest']]).map(([k, l]) => React.createElement("button", {
     key: k,
     onClick: () => setSort(k),
     className: 'font-mono text-[10px] uppercase tracking-wider2 transition-colors ' + (sort === k ? 'text-ink border-b border-ink pb-0.5' : 'text-faint hover:text-ink2')
@@ -4311,6 +4324,7 @@ function ShelfView({
     s: s,
     i: i,
     me: me,
+    profile: profile,
     onOpen: () => openItem(s.id)
   }))), sup && React.createElement("button", {
     onClick: () => setView('extract'),
@@ -5847,6 +5861,441 @@ function TourBar({
     }
   }, "Done"))));
 }
+const CERTS = {
+  safety: {
+    label: 'General lab safety',
+    hours: 1,
+    note: 'Required to be in any wet lab unsupervised.'
+  },
+  bsl2: {
+    label: 'BSL-2 biosafety',
+    hours: 2,
+    note: 'Recombinant organisms, including routine E. coli work.'
+  },
+  iacuc: {
+    label: 'IACUC animal handling',
+    hours: 2,
+    note: 'Any procedure involving vertebrate animals.'
+  },
+  irb: {
+    label: 'IRB human subjects',
+    hours: 2,
+    note: 'Any data collected from people.'
+  },
+  rad: {
+    label: 'Radiation safety',
+    hours: 3,
+    note: 'Sealed sources and radiolabelled reagents.'
+  }
+};
+const GOALS = {
+  paper: 'A paper or a poster',
+  thesis: 'A senior thesis',
+  breadth: 'A range of techniques',
+  decide: 'To find out whether research is for me',
+  grad: 'A grad school application',
+  med: 'A medical school application'
+};
+const LIMITS = {
+  'no-animal': 'No animal work',
+  'no-early': 'No early mornings',
+  'computational': 'Computational only',
+  'term-only': 'Term time only, not summer'
+};
+const BLANK_PROFILE = {
+  hours: 8,
+  grad: '',
+  certs: [],
+  prior: '',
+  goals: [],
+  limits: [],
+  confirms: {},
+  done: false
+};
+function derived(person, projects) {
+  const methods = [];
+  projects.forEach(p => p.log.forEach(e => {
+    if (e.t === 'method' && authorsOf(e).some(a => a.k === person.k)) methods.push({
+      e,
+      p
+    });
+  }));
+  const touched = projects.filter(p => p.log.some(e => authorsOf(e).some(a => a.k === person.k)) || (person.projects || []).includes(p.id));
+  const entries = projects.flatMap(p => p.log.filter(e => authorsOf(e).some(a => a.k === person.k)));
+  return {
+    methods,
+    touched,
+    entries,
+    deadends: entries.filter(e => e.t === 'deadend').length,
+    signed: entries.filter(e => e.ack === true).length
+  };
+}
+function eligibility(profile, shelf) {
+  const held = new Set(profile.certs || []);
+  const open = [],
+    locked = [];
+  shelf.filter(s => !s.claimedBy).forEach(s => {
+    const missing = (s.requires || []).filter(r => !held.has(r));
+    (missing.length ? locked : open).push({
+      s,
+      missing
+    });
+  });
+  const byCert = {};
+  locked.forEach(({
+    s,
+    missing
+  }) => missing.forEach(c => {
+    byCert[c] = byCert[c] || [];
+    byCert[c].push(s);
+  }));
+  return {
+    open,
+    locked,
+    byCert
+  };
+}
+function fitScore(s, profile) {
+  let n = 50;
+  const termWeeks = Math.max(4, (profile.hours || 8) * 1.6);
+  n += s.weeks <= termWeeks ? 12 : -6;
+  if ((profile.limits || []).includes('computational') && s.mode !== 'computational') n -= 22;
+  if ((profile.limits || []).includes('no-animal') && /mouse|animal|surgery/i.test(s.name + s.oneLine)) n -= 25;
+  if ((profile.goals || []).includes('breadth')) n += s.learn.length * 2;
+  if ((profile.goals || []).includes('paper') && /write|methods note|manuscript/i.test(JSON.stringify(s.remaining))) n += 10;
+  if ((profile.goals || []).includes('decide') && s.level === 'intro') n += 10;
+  const missing = (s.requires || []).filter(r => !(profile.certs || []).includes(r)).length;
+  n -= missing * 15;
+  return n;
+}
+function Chips({
+  options,
+  value,
+  onChange,
+  multi = true
+}) {
+  return React.createElement("div", {
+    className: "flex flex-wrap gap-2"
+  }, Object.entries(options).map(([k, label]) => {
+    const on = multi ? value.includes(k) : value === k;
+    return React.createElement("button", {
+      key: k,
+      type: "button",
+      "aria-pressed": on,
+      onClick: () => onChange(multi ? on ? value.filter(x => x !== k) : [...value, k] : k),
+      className: 'text-[13px] px-3.5 py-2 rounded-[3px] border transition-all ' + (on ? 'bg-ink text-paper border-ink' : 'hair hover:border-rule2')
+    }, label);
+  }));
+}
+function Intake({
+  me,
+  profile,
+  setProfile,
+  onDone
+}) {
+  const p = profile;
+  const set = (k, v) => setProfile({
+    ...p,
+    [k]: v
+  });
+  const ok = p.hours > 0 && p.goals.length > 0;
+  return React.createElement("div", {
+    className: "max-w-[1240px] mx-auto px-8 pb-32"
+  }, React.createElement(Plate, {
+    tone: "warm",
+    eyebrow: "Set up",
+    ghost: "1",
+    title: "Five questions the log cannot answer for you.",
+    lede: "Everything else is worked out from what you write as you go. This is only the part no record can observe: how much time you have, what you are allowed to do, and what you want out of it."
+  }), React.createElement("div", {
+    className: "mt-10 max-w-[760px] space-y-11"
+  }, React.createElement("section", null, React.createElement("h2", {
+    className: "font-display text-[22px]"
+  }, "How much time do you have?"), React.createElement("p", {
+    className: "text-[13px] text-muted mt-1.5"
+  }, "Used to size projects, not to judge you. Be realistic about a bad week."), React.createElement("div", {
+    className: "flex items-center gap-4 mt-5 flex-wrap"
+  }, React.createElement("input", {
+    type: "range",
+    min: "2",
+    max: "30",
+    value: p.hours,
+    onChange: e => set('hours', +e.target.value),
+    className: "w-[260px]",
+    "aria-label": "Hours per week"
+  }), React.createElement("span", {
+    className: "font-display text-[30px] leading-none font-light tnum"
+  }, p.hours), React.createElement("span", {
+    className: "font-mono text-[10px] uppercase tracking-wider2 text-muted"
+  }, "hours per week")), React.createElement("div", {
+    className: "mt-6 max-w-[260px]"
+  }, React.createElement(Kicker, {
+    className: "mb-2"
+  }, "Expected graduation"), React.createElement("input", {
+    type: "date",
+    value: p.grad,
+    onChange: e => set('grad', e.target.value),
+    className: "w-full bg-transparent border-b hair pb-2 text-[14px] focus:border-ink transition-colors"
+  }))), React.createElement("section", null, React.createElement("h2", {
+    className: "font-display text-[22px]"
+  }, "What training do you already have?"), React.createElement("p", {
+    className: "text-[13px] text-muted mt-1.5 measure"
+  }, "These are hard gates, not preferences \u2014 a project either requires one or it does not. Checking them here is what opens projects to you."), React.createElement("div", {
+    className: "mt-5 space-y-2.5"
+  }, Object.entries(CERTS).map(([k, c]) => {
+    const on = p.certs.includes(k);
+    return React.createElement("button", {
+      key: k,
+      type: "button",
+      "aria-pressed": on,
+      onClick: () => set('certs', on ? p.certs.filter(x => x !== k) : [...p.certs, k]),
+      className: 'w-full text-left flex items-start gap-3.5 px-4 py-3 rounded-[3px] border transition-all ' + (on ? 'border-ink' : 'hair hover:border-rule2'),
+      style: on ? {
+        background: 'rgba(74,72,68,.06)'
+      } : {}
+    }, React.createElement("span", {
+      className: "mt-[2px] w-[18px] h-[18px] rounded-[3px] border grid place-items-center shrink-0",
+      style: {
+        borderColor: on ? '#4A4844' : '#C2C0BA',
+        background: on ? '#4A4844' : 'transparent',
+        color: '#F2F1EE'
+      }
+    }, on && React.createElement("span", {
+      className: "text-[11px] leading-none"
+    }, "\u2713")), React.createElement("span", {
+      className: "flex-1"
+    }, React.createElement("span", {
+      className: "block text-[14px]"
+    }, c.label), React.createElement("span", {
+      className: "block text-[12.5px] text-muted leading-snug mt-0.5"
+    }, c.note)), React.createElement("span", {
+      className: "font-mono text-[9.5px] uppercase tracking-wider2 text-faint shrink-0 mt-1"
+    }, c.hours, "h course"));
+  }))), React.createElement("section", null, React.createElement("h2", {
+    className: "font-display text-[22px]"
+  }, "What do you want out of this?"), React.createElement("p", {
+    className: "text-[13px] text-muted mt-1.5"
+  }, "This changes what counts as a good project far more than your skills do."), React.createElement("div", {
+    className: "mt-5"
+  }, React.createElement(Chips, {
+    options: GOALS,
+    value: p.goals,
+    onChange: v => set('goals', v)
+  }))), React.createElement("section", null, React.createElement("h2", {
+    className: "font-display text-[22px]"
+  }, "Anything that rules a project out?"), React.createElement("div", {
+    className: "mt-5"
+  }, React.createElement(Chips, {
+    options: LIMITS,
+    value: p.limits,
+    onChange: v => set('limits', v)
+  }))), React.createElement("section", null, React.createElement("h2", {
+    className: "font-display text-[22px]"
+  }, "Anything you have done elsewhere?"), React.createElement("p", {
+    className: "text-[13px] text-muted mt-1.5 measure"
+  }, "A course, a summer job, another lab. Two lines is plenty \u2014 this is the only part of your background that is genuinely invisible to us."), React.createElement("textarea", {
+    rows: 3,
+    value: p.prior,
+    onChange: e => set('prior', e.target.value),
+    placeholder: "Took organic chem lab, spent a summer doing water sampling\u2026",
+    className: "w-full mt-4 bg-transparent border-b hair pb-2 text-[14px] leading-relaxed placeholder:text-faint focus:border-ink transition-colors resize-none"
+  })), React.createElement("div", {
+    className: "flex items-center gap-4 pt-6 dbl flex-wrap"
+  }, React.createElement("button", {
+    disabled: !ok,
+    onClick: () => {
+      setProfile({
+        ...p,
+        done: true
+      });
+      onDone();
+    },
+    className: 'font-mono text-[10px] uppercase tracking-wider2 px-5 py-3 rounded-[2px] transition-all ' + (ok ? 'bg-ink text-paper hover:tracking-[.26em]' : 'bg-rule/60 text-faint cursor-not-allowed')
+  }, "Save and see what opens up"), React.createElement("span", {
+    className: "text-[12px] text-faint"
+  }, "You can change any of this later. Nothing here is permanent."))));
+}
+function ProfileView({
+  me,
+  projects,
+  shelf,
+  profile,
+  setProfile,
+  openItem,
+  open,
+  setView
+}) {
+  const p = profile;
+  if (!p.done) return React.createElement(Intake, {
+    me: me,
+    profile: p,
+    setProfile: setProfile,
+    onDone: () => window.scrollTo({
+      top: 0
+    })
+  });
+  const d = derived(me, projects);
+  const el = eligibility(p, shelf);
+  const confirm = (id, v) => setProfile({
+    ...p,
+    confirms: {
+      ...p.confirms,
+      [id]: v
+    }
+  });
+  const CONF = {
+    yes: 'Comfortable',
+    rusty: 'Rusty',
+    no: 'Not really'
+  };
+  return React.createElement("div", {
+    className: "max-w-[1240px] mx-auto px-8 pb-32"
+  }, React.createElement(Plate, {
+    variant: "rule",
+    eyebrow: "About you",
+    ghost: d.entries.length,
+    title: "What we know, and how we know it.",
+    lede: "Almost none of this was typed in. It is read off the entries you have written, which is why it stays true as you work. Correct anything that is wrong \u2014 the corrections are what make it yours.",
+    figures: [[el.open.length, el.open.length === 1 ? 'project open to you' : 'projects open to you'], [d.methods.length, d.methods.length === 1 ? 'procedure you documented' : 'procedures you documented'], [p.hours, 'hours a week'], [d.entries.length, d.entries.length === 1 ? 'entry on your record' : 'entries on your record']]
+  }), React.createElement("section", {
+    className: "mt-14"
+  }, React.createElement("div", {
+    className: "flex items-baseline justify-between gap-4 flex-wrap"
+  }, React.createElement("h2", {
+    className: "font-display text-[26px]"
+  }, "Read off your entries"), React.createElement("span", {
+    className: "font-mono text-[10px] uppercase tracking-wider2 text-faint"
+  }, "Derived \u00b7 correct anything wrong")), d.methods.length === 0 ? React.createElement("p", {
+    className: "font-display italic text-[16px] text-muted mt-5 measure"
+  }, "Nothing yet \u2014 which is exactly right if you have just started. This fills in on its own as you file entries, and you never have to come back and update it.") : React.createElement("div", {
+    className: "mt-6 space-y-3"
+  }, d.methods.map(({
+    e,
+    p: proj
+  }) => {
+    const v = p.confirms[e.id];
+    return React.createElement("div", {
+      key: e.id,
+      className: "border hair rounded-[3px] bg-card px-5 py-4 flex items-start gap-5 flex-wrap"
+    }, React.createElement("div", {
+      className: "flex-1 min-w-[22ch]"
+    }, React.createElement("div", {
+      className: "text-[14.5px] leading-snug"
+    }, "We have you down as comfortable with ", React.createElement("span", {
+      className: "font-display italic"
+    }, e.h.replace(/^The /, '').toLowerCase()), "."), React.createElement("div", {
+      className: "font-mono text-[10px] text-faint mt-1.5"
+    }, "Because you wrote it \u00b7 ", proj.code, " \u00b7 ", fmt(e.d))), React.createElement("div", {
+      className: "flex gap-1.5 shrink-0"
+    }, Object.entries(CONF).map(([k, label]) => React.createElement("button", {
+      key: k,
+      onClick: () => confirm(e.id, k),
+      "aria-pressed": v === k,
+      className: 'font-mono text-[9.5px] uppercase tracking-wider2 px-2.5 py-1.5 rounded-[2px] border transition-all ' + (v === k ? 'bg-ink text-paper border-ink' : 'hair hover:border-rule2')
+    }, label))));
+  }))), React.createElement("section", {
+    className: "mt-14"
+  }, React.createElement("h2", {
+    className: "font-display text-[26px]"
+  }, "What your training opens"), React.createElement("p", {
+    className: "text-[13.5px] text-muted mt-2 measure"
+  }, "Certifications are the one hard gate in the system. Nothing is hidden from you \u2014 locked projects still appear on the shelf, marked, so you can see what a couple of hours would buy."), React.createElement("div", {
+    className: "mt-6 grid md:grid-cols-2 gap-5"
+  }, React.createElement("div", {
+    className: "border hair rounded-[3px] bg-card p-6",
+    style: {
+      borderLeft: '3px solid #4A4844'
+    }
+  }, React.createElement("div", {
+    className: "font-display text-[40px] leading-none font-light tnum"
+  }, el.open.length), React.createElement("div", {
+    className: "font-mono text-[9.5px] uppercase tracking-wider2 text-muted mt-2"
+  }, "open to you right now"), el.open.length > 0 && React.createElement("div", {
+    className: "mt-4 space-y-2"
+  }, el.open.slice(0, 3).map(({
+    s
+  }) => React.createElement("button", {
+    key: s.id,
+    onClick: () => openItem(s.id),
+    className: "group block text-left w-full"
+  }, React.createElement("span", {
+    className: "text-[13.5px] leading-snug u-hover"
+  }, s.name))))), React.createElement("div", {
+    className: "border hair rounded-[3px] bg-card p-6",
+    style: {
+      borderLeft: '3px solid #96720C'
+    }
+  }, React.createElement("div", {
+    className: "font-display text-[40px] leading-none font-light tnum",
+    style: {
+      color: el.locked.length ? '#96720C' : '#9C9A95'
+    }
+  }, el.locked.length), React.createElement("div", {
+    className: "font-mono text-[9.5px] uppercase tracking-wider2 text-muted mt-2"
+  }, "waiting on a certification"), Object.keys(el.byCert).length === 0 ? React.createElement("p", {
+    className: "text-[13px] text-muted mt-4"
+  }, "Nothing is gated for you.") : React.createElement("div", {
+    className: "mt-4 space-y-3"
+  }, Object.entries(el.byCert).map(([c, list]) => React.createElement("div", {
+    key: c,
+    className: "flex items-start gap-3"
+  }, React.createElement("span", {
+    className: "font-mono text-[9.5px] uppercase tracking-wider2 px-1.5 py-[3px] rounded-[2px] shrink-0 mt-[1px]",
+    style: {
+      color: '#96720C',
+      background: 'rgba(150,114,12,.14)'
+    }
+  }, CERTS[c].hours, "h"), React.createElement("span", {
+    className: "text-[13.5px] leading-snug"
+  }, React.createElement("span", {
+    className: "font-display italic"
+  }, CERTS[c].label), " would open ", pl(list.length, 'project', 'projects'), "."))))))), React.createElement("section", {
+    className: "mt-14"
+  }, React.createElement("div", {
+    className: "flex items-baseline justify-between gap-4 flex-wrap"
+  }, React.createElement("h2", {
+    className: "font-display text-[26px]"
+  }, "What you told us"), React.createElement("button", {
+    onClick: () => setProfile({
+      ...p,
+      done: false
+    }),
+    className: "font-mono text-[10px] uppercase tracking-wider2 px-3 py-1.5 border hair rounded-[2px] hover:border-ink transition-colors"
+  }, "Edit")), React.createElement("div", {
+    className: "mt-5 grid sm:grid-cols-2 lg:grid-cols-4 gap-6"
+  }, [['Time', p.hours + ' hours a week'], ['Graduating', p.grad ? fmt(p.grad) : 'not set'], ['Training', p.certs.length ? p.certs.map(c => CERTS[c].label).join(', ') : 'none recorded'], ['Looking for', p.goals.map(g => GOALS[g]).join(', ') || '\u2014']].map(([k, v]) => React.createElement("div", {
+    key: k
+  }, React.createElement(Kicker, null, k), React.createElement("div", {
+    className: "text-[14px] mt-1.5 leading-snug"
+  }, v)))), p.prior && React.createElement("div", {
+    className: "mt-6"
+  }, React.createElement(Kicker, null, "Experience elsewhere"), React.createElement("p", {
+    className: "text-[14px] leading-relaxed mt-1.5 measure"
+  }, p.prior)), p.limits.length > 0 && React.createElement("div", {
+    className: "mt-6"
+  }, React.createElement(Kicker, null, "Ruled out"), React.createElement("p", {
+    className: "text-[14px] mt-1.5"
+  }, p.limits.map(l => LIMITS[l]).join(' \u00b7 ')))), React.createElement("section", {
+    className: "mt-14 border-t hair pt-8"
+  }, React.createElement("h2", {
+    className: "font-display text-[22px]"
+  }, "How this is used"), React.createElement("div", {
+    className: "mt-4 space-y-2.5 measure"
+  }, ['The shelf is reordered for you, never filtered. Everything stays visible, and anything gated says so.', 'Your brief expands the parts you have not done before and stays short on the parts you have.', 'Dead ends are always shown in full, whatever your profile says. A failure record is never something you are judged ready for.'].map(t => React.createElement("div", {
+    key: t,
+    className: "flex items-start gap-3"
+  }, React.createElement("span", {
+    className: "w-[5px] h-[5px] rounded-full shrink-0 mt-[8px]",
+    style: {
+      background: '#4A4844'
+    }
+  }), React.createElement("p", {
+    className: "text-[13.5px] leading-relaxed text-ink2"
+  }, t)))), React.createElement("button", {
+    onClick: () => setView('shelf'),
+    className: "mt-7 font-mono text-[10px] uppercase tracking-wider2 px-5 py-3 bg-ink text-paper rounded-[2px] hover:tracking-[.26em] transition-all"
+  }, "See the shelf, ordered for you \u2192")));
+}
 function App() {
   const saved = useRef(loadState()).current;
   const route = useRef(readHash()).current;
@@ -5868,6 +6317,7 @@ function App() {
   const [checked, setChecked] = useState(saved ? saved.checked : []);
   const [briefsMade, setBriefsMade] = useState(saved ? saved.briefsMade : []);
   const [shared, setShared] = useState(saved ? saved.shared : ['amara']);
+  const [profiles, setProfiles] = useState(saved && saved.profiles ? saved.profiles : {});
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [orient, setOrient] = useState(!saved && !route);
   const [tour, setTour] = useState(null);
@@ -5900,11 +6350,12 @@ function App() {
       checked,
       briefsMade,
       shared,
+      profiles,
       meKey: me.k,
       view,
       peopleProjects
     });
-  }, [projects, shelf, nudged, checked, briefsMade, shared, me.k, view]);
+  }, [projects, shelf, nudged, checked, briefsMade, shared, profiles, me.k, view]);
   useEffect(() => {
     const onHash = () => {
       const r = readHash();
@@ -5975,6 +6426,14 @@ function App() {
   const toggleCheck = id => setChecked(c => c.includes(id) ? c.filter(x => x !== id) : [...c, id]);
   const onMade = pid => setBriefsMade(b => b.includes(pid) ? b : [...b, pid]);
   const toggleShare = k => setShared(a => a.includes(k) ? a.filter(x => x !== k) : [...a, k]);
+  const myProfile = {
+    ...BLANK_PROFILE,
+    ...(profiles[me.k] || {})
+  };
+  const setMyProfile = v => setProfiles(o => ({
+    ...o,
+    [me.k]: v
+  }));
   function addEntry(pid, e, author) {
     setProjects(ps => ps.map(p => p.id !== pid ? p : {
       ...p,
@@ -6215,7 +6674,8 @@ function App() {
     shelf: shelfScoped,
     me: me,
     openItem: openItem,
-    setView: setView
+    setView: setView,
+    profile: myProfile
   }), view === 'shelfitem' && item && React.createElement(RevivalBrief, {
     s: item,
     me: me,
@@ -6259,6 +6719,15 @@ function App() {
     auto: true,
     openProject: open,
     onMade: onMade
+  }), view === 'profile' && React.createElement(ProfileView, {
+    me: me,
+    projects: projects,
+    shelf: shelfScoped,
+    profile: myProfile,
+    setProfile: setMyProfile,
+    openItem: openItem,
+    open: open,
+    setView: setView
   }), view === 'record' && React.createElement(RecordView, {
     projects: projects,
     shelf: shelf,
