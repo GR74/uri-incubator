@@ -51,7 +51,7 @@ tailwind.config = {
     mix-blend-mode:multiply;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
   }
-  ::selection { background: #1A1917; color: #F2F1EE; }
+  ::selection { background: #BB0000; color: #F2F1EE; }
   ::-webkit-scrollbar { width: 11px; height: 11px; }
   ::-webkit-scrollbar-track { background: #E7E6E2; }
   ::-webkit-scrollbar-thumb { background: #C2C0BA; border: 3px solid #E7E6E2; }
@@ -60,17 +60,29 @@ tailwind.config = {
   .hair { border-color:#D9D7D2; }
   .measure { max-width: 66ch; }
 
+  /* Ragged lines are the main thing separating "typeset" from "rendered". */
+  h1, h2, h3, .font-display { text-wrap: balance; }
+  p, li { text-wrap: pretty; }
+  .font-display { font-optical-sizing: auto; }
+  h1 { letter-spacing: -0.016em; }
+  h2 { letter-spacing: -0.009em; }
+  h3 { letter-spacing: -0.005em; }
+  /* the serif sets a touch dark at display sizes on a light ground */
+  .plate h1, .plate h2 { text-shadow: 0 1px 0 rgba(0,0,0,.28); }
+
   @keyframes rise { from { opacity:0; transform: translateY(14px); } to { opacity:1; transform:none; } }
   @keyframes fade { from { opacity:0 } to { opacity:1 } }
   @keyframes sweep { from { transform: scaleX(0) } to { transform: scaleX(1) } }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.15} }
   @keyframes breathe { 0%,100%{ box-shadow:0 0 0 0 rgba(187,0,0,.40) } 50%{ box-shadow:0 0 0 5px rgba(187,0,0,0) } }
-  .rise { opacity:0; animation: rise .62s cubic-bezier(.22,.65,.28,1) forwards; }
+  .rise { opacity:0; animation: rise .5s cubic-bezier(.16,.84,.28,1) forwards; }
   .fade { opacity:0; animation: fade .5s ease forwards; }
   .sweep { transform-origin:left; animation: sweep .7s cubic-bezier(.22,.65,.28,1) forwards; }
   .blink { animation: blink 1.1s steps(1,end) infinite; }
   .breathe { animation: breathe 2.6s ease-in-out infinite; }
 
+  button:not(:disabled) { transition: transform .12s cubic-bezier(.2,.7,.25,1); }
+  button:not(:disabled):active { transform: translateY(1px); }
   .lift { transition: transform .35s cubic-bezier(.22,.65,.28,1), box-shadow .35s ease, background-color .3s ease; }
   .lift:hover { transform: translateY(-2px); box-shadow: 0 18px 40px -28px rgba(26,25,23,.55); }
 
@@ -118,7 +130,7 @@ tailwind.config = {
   .hatch-warn{ background-image:repeating-linear-gradient(45deg, rgba(187,0,0,.34) 0 1px, transparent 1px 7px); }
 
   /* ── accessibility ── */
-  :focus-visible { outline: 2px solid #1A1917; outline-offset: 2px; border-radius: 2px; }
+  :focus-visible { outline: 2px solid #BB0000; outline-offset: 3px; border-radius: 3px; }
   .plate :focus-visible, [data-onplate] :focus-visible { outline-color:#EDECE8; }
   .skip { position:absolute; left:-9999px; top:0; z-index:200; }
   .skip:focus { left:8px; top:8px; background:#1A1917; color:#F2F1EE; padding:10px 16px;
@@ -135,6 +147,8 @@ tailwind.config = {
     .dcap::first-letter { font-size:48px; padding:5px 8px 0 0; }
     .ghostnum { font-size:130px; }
   }
+  header { transition: box-shadow .3s ease, background-color .3s ease; }
+  header.floated { box-shadow: 0 1px 0 #C2C0BA, 0 14px 30px -26px rgba(26,25,23,.5); }
   .tabscroll { -ms-overflow-style:none; scrollbar-width:none; }
   .tabscroll::-webkit-scrollbar { display:none; }
 
@@ -614,6 +628,29 @@ function Meter({ ci, wide, light }){
     </div>
   );
 }
+function Tally({ value, className, style }){
+  /* start at zero so the first reveal counts up too -- that is the moment the
+     number actually means something */
+  const [shown, setShown] = useState(0);
+  const prev = useRef(0);
+  useEffect(() => {
+    if (prev.current === value) { setShown(value); return; }
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      prev.current = value; setShown(value); return;
+    }
+    const from = prev.current, to = value, t0 = performance.now(), dur = 420;
+    let raf;
+    const step = now => {
+      const k = Math.min(1, (now - t0) / dur);
+      setShown(Math.round(from + (to - from) * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) raf = requestAnimationFrame(step); else prev.current = to;
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <span className={className} style={style}>{shown}</span>;
+}
+
 function SevDot({ sev }){ return <span className="w-[6px] h-[6px] rounded-full shrink-0 mt-[6px]" style={{ background:SEV[sev].c }} />; }
 
 function Tag({ children, light }){
@@ -653,6 +690,13 @@ const TABS = {
 
 function Masthead({ me, setMe, view, setView, ticker, openPalette }){
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const el = document.querySelector('header');
+    const onScroll = () => el && el.classList.toggle('floated', window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive:true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
   const lens = lensOf(me);
   const sup = lens === 'sup';
   const tabs = TABS[lens](me);
@@ -3599,8 +3643,8 @@ function Simulator({ projects, shelf, me }){
               [r.shelfHit.length, r.shelfHit.length === 1 ? 'shelved project gets harder to revive' : 'shelved projects get harder to revive']]
               .map(([n,l],i) => (
                 <div key={l} className="pr-4 rise" style={{ animationDelay:(i*70)+'ms' }}>
-                  <div className="font-display text-[38px] leading-none font-light tnum"
-                       style={{ color: n > 0 ? '#BB0000' : '#9C9A95' }}>{n}</div>
+                  <Tally value={n} className="block font-display text-[38px] leading-none font-light tnum"
+                         style={{ color: n > 0 ? '#BB0000' : '#9C9A95', transition:'color .3s ease' }} />
                   <div className="font-mono text-[9.5px] uppercase tracking-wider2 text-muted mt-2 leading-relaxed">{l}</div>
                 </div>
             ))}
