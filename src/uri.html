@@ -180,6 +180,7 @@ tailwind.config = {
   });
 </script>
 
+<script type="text/babel" data-presets="react-classic" src="workspace-domain.jsx"></script>
 <script type="text/babel" data-presets="react-classic" src="workspace-research-domain.jsx"></script>
 <script type="text/babel" data-presets="react-classic" src="workspace-research.jsx"></script>
 <script type="text/babel" data-presets="react-classic" src="workspace-evidence.jsx"></script>
@@ -2269,7 +2270,12 @@ function Brief({ p, who, openProject }){
 const STORE = 'uri.demo.v3';
 
 function saveState(o){
-  try { localStorage.setItem(STORE, JSON.stringify(o)); } catch (e) {}
+  try {
+    localStorage.setItem(STORE, JSON.stringify(o));
+    return { ok:true };
+  } catch (error) {
+    return { ok:false, error:'Could not save this workspace locally: ' + (error.message || 'storage failed') };
+  }
 }
 function loadState(){
   try {
@@ -4704,6 +4710,59 @@ function App(){
   const myProfile = { ...BLANK_PROFILE, ...(profiles[me.k] || {}) };
   const setMyProfile = v => setProfiles(o => ({ ...o, [me.k]: v }));
 
+  function currentPeopleProjects(){
+    const value = {};
+    PEOPLE.forEach(person => { if (person.projects) value[person.k] = [...person.projects]; });
+    return value;
+  }
+
+  function appSnapshot(peopleProjects){
+    return {
+      projects, shelf, nudged, checked, briefsMade, shared, profiles, tourDone,
+      meKey:me.k, view, peopleProjects,
+    };
+  }
+
+  function commitTransition(transition, assignmentKey){
+    if (!transition || !transition.ok) return transition || { ok:false, error:'Project change failed.' };
+    const peopleProjects = currentPeopleProjects();
+    if (assignmentKey) {
+      peopleProjects[assignmentKey] = [...new Set([...(peopleProjects[assignmentKey] || []), transition.project.id])];
+    }
+    const persisted = wsPersistProjectTransition(localStorage, STORE, appSnapshot(peopleProjects), transition);
+    if (!persisted.ok) return persisted;
+    if (assignmentKey) {
+      const person = byKey(assignmentKey);
+      if (person) person.projects = peopleProjects[assignmentKey];
+    }
+    setProjects(persisted.projects);
+    return persisted;
+  }
+
+  const stashProject = (project, form) => commitTransition(wsStashProject(project, {
+    ...form,
+    actorKey:me.k,
+    now:new Date().toISOString(),
+  }));
+  const resumeProject = project => commitTransition(wsResumeProject(project, {
+    actorKey:me.k,
+    now:new Date().toISOString(),
+  }));
+  const setStashVisibility = (project, visibility) => commitTransition(wsSetStashVisibility(project, {
+    visibility,
+    actorKey:me.k,
+    now:new Date().toISOString(),
+  }));
+  const continueProject = project => {
+    const transition = wsContinueProject(project, {
+      newId:'continued-' + Date.now().toString(36),
+      newCode:project.code + '-C' + (projects.filter(item => item.continuedFrom === project.id).length + 1),
+      actor:me,
+      now:new Date().toISOString(),
+    });
+    return commitTransition(transition, me.k);
+  };
+
   function addEntry(pid, e, author){
     setProjects(ps => ps.map(p => p.id !== pid ? p : ({ ...p, log:[...p.log, {
       ...e, id:'n' + Math.random().toString(36).slice(2,7), d:'2026-08-25', au:author.s,
@@ -4815,6 +4874,8 @@ function App(){
 
   if (!legacy && lens !== 'partner') {
     return <ResearchWorkspace projects={projects} me={me} onIdentityChange={setMe} shelf={shelf}
+      onStash={stashProject} onResume={resumeProject} onSetStashVisibility={setStashVisibility}
+      onContinue={continueProject}
       onPublishEntries={(pid, entries) => {
         if (!['pi', 'phd'].includes(me.tier) || !(me.scope === 'all' || (me.projects || []).includes(pid))) return;
         setProjects(ps => ps.map(p => p.id !== pid ? p : { ...p, log:[...p.log, ...entries.filter(e => !p.log.some(old => old.id === e.id))] }));
