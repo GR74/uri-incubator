@@ -26,10 +26,15 @@ const Babel = require(path.join(VENDOR, 'babel.js'));
 const src = read(SRC);
 
 /* ---- 1. compile the JSX ---------------------------------------------------- */
-const open = src.indexOf('<script type="text/babel"');
-const bodyStart = src.indexOf('>', open) + 1;
-const bodyEnd = src.indexOf('</script>', bodyStart);
-let jsx = src.slice(bodyStart, bodyEnd);
+const scriptBlocks = [...src.matchAll(/<script\b([^>]*\btype="text\/babel"[^>]*)>([\s\S]*?)<\/script>/g)];
+if (!scriptBlocks.length) throw new Error('No application JSX found');
+let jsx = scriptBlocks.map(([, attributes, body]) => {
+  const external = attributes.match(/\bsrc="([^"]+)"/);
+  if (!external) return body;
+  const file = path.resolve(path.dirname(SRC), external[1]);
+  if (!file.startsWith(path.dirname(SRC) + path.sep)) throw new Error('JSX must be inside src/');
+  return read(file);
+}).join('\n');
 
 // jsesc only escapes string literals, so the one regex holding non-ASCII is
 // escaped here rather than after compilation.
@@ -54,18 +59,23 @@ try {
 
 /* ---- 3. inline everything -------------------------------------------------- */
 let css = src.match(/<style>([\s\S]*?)<\/style>/)[1];
+css += '\n' + read(path.join(ROOT, 'src', 'workspace.css'));
 css = css.replace(/[^\x00-\x7F]/g, '-');              // box-drawing chars in comments
 const twConfig = src.match(/<script>\s*(tailwind\.config[\s\S]*?)<\/script>/)[1];
 
 const doc = [
+  '<!doctype html><html lang="en"><head>',
+  '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
   '<title>Undergraduate Research Incubator</title>',
   '<style>\n' + read(path.join(VENDOR, 'fonts-inline.css')) + '\n' + css + '\n</style>',
   '<script>' + read(path.join(VENDOR, 'tailwind.js')) + '</script>',
   '<script>' + twConfig + '</script>',
+  '</head><body class="font-sans text-ink antialiased">',
   '<div id="root"></div>',
   '<script>' + read(path.join(VENDOR, 'react.js')) + '</script>',
   '<script>' + read(path.join(VENDOR, 'react-dom.js')) + '</script>',
   '<script>' + app + '</script>',
+  '</body></html>',
 ].join('\n');
 
 /* ---- 4. refuse to ship a broken build -------------------------------------- */

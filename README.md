@@ -11,6 +11,16 @@ leaves, read when someone arrives.
 
 ## What's in it
 
+The new research workspace opens by default. It groups project work, evidence,
+reviews, handoffs, and discovery in one navigation shell. Drafts and sample
+records are stored in the browser; authentication, cloud storage, and AI
+extraction are not connected yet. The original three-lens prototype remains
+available from **Original prototype** or with `?legacy=1`.
+
+Each project also has a **Research** view for team-entered tasks, experiments,
+milestones, and explicit measurements. Operational tracking stays separate from
+the reviewed evidence record and can be exported as project-scoped CSV or JSON.
+
 Three lenses over the same log, switched from the control at the top right:
 
 | Lens | What it's for |
@@ -38,22 +48,32 @@ walkthrough in the footer for a guided six-stop tour.
 ```
 index.html        the deployed page — generated, do not edit by hand
 src/uri.html      the source — edit this
+src/workspace.jsx workspace screens, project overview, handoff and export
+src/workspace-evidence.jsx local evidence intake and review workflow
+src/workspace-research-domain.jsx immutable tracking revisions and exports
+src/workspace-research.jsx project research view and operational summary
+src/workspace.css responsive workspace styles
 build/build.js    rebuilds index.html from src
+build/serve.js    serves a local preview at http://127.0.0.1:4173
 build/vendor/     React, Tailwind, Babel, and the embedded typefaces
+tests/            Node regression tests and fictional upload fixtures
 ```
 
 ## Changing something
 
 ```bash
-# 1. edit src/uri.html
+# 1. edit the relevant file under src/
 # 2. rebuild
 node build/build.js
-# 3. commit and push — the host redeploys on its own
+# 3. preview
+node build/serve.js
+# 4. run regression tests
+node --test tests/*.test.cjs
 ```
 
-`src/uri.html` opens directly in a browser for quick checks (it loads React and
-the fonts from CDNs, so it needs a connection). `index.html` is fully
-self-contained and is what gets deployed.
+Open the local server root for the self-contained production preview. For source
+preview, open `/src/uri.html` on that server; it loads React and fonts from CDNs
+and the local JSX modules. `index.html` remains self-contained and deployable.
 
 ### Two things that bite when editing by hand
 

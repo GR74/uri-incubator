@@ -164,6 +164,7 @@ tailwind.config = {
   .group:hover .u-hover{ background-size:100% 1px; }
 
 </style>
+<link rel="stylesheet" href="workspace.css">
 </head>
 <body class="font-sans text-ink antialiased">
 <div id="root"></div>
@@ -179,6 +180,10 @@ tailwind.config = {
   });
 </script>
 
+<script type="text/babel" data-presets="react-classic" src="workspace-research-domain.jsx"></script>
+<script type="text/babel" data-presets="react-classic" src="workspace-research.jsx"></script>
+<script type="text/babel" data-presets="react-classic" src="workspace-evidence.jsx"></script>
+<script type="text/babel" data-presets="react-classic" src="workspace.jsx"></script>
 <script type="text/babel" data-presets="react-classic">
 const { useState, useMemo, useEffect, useRef, useContext, createContext } = React;
 const NavCtx = createContext({ openRecord:()=>{}, open:()=>{}, openItem:()=>{} });
@@ -526,6 +531,9 @@ function grade(s){ return s >= 80 ? 'Strong' : s >= 60 ? 'Adequate' : s >= 40 ? 
    The undergraduate whose name is attached sees the same rows as a to-do list.
    Nothing is computed twice, which is the point of the whole product. */
 function debts(p){
+  if (!p.log.length) return [{ sev:2, k:'empty', h:'No research has been recorded yet',
+    faculty:'Add the first project update before assessing handoff readiness.',
+    student:'Record what you are trying, what you have done, and the next step.' }];
   const out = [];
   const c = counts(p);
   const ss = singleSource(p);
@@ -2293,9 +2301,14 @@ function writeHash({ who, view, id }){
 }
 
 /* ── universal search index ───────────────────────────────────────────────── */
-function buildIndex({ projects, shelf, me, lens }){
+function buildIndex({ projects, shelf, me, lens, shared = [] }){
   const out = [];
   TABS[lens](me).forEach(([k,label]) => out.push({ kind:'View', label, sub:'Go to ' + label.toLowerCase(), act:{ t:'view', v:k } }));
+  if (lens === 'partner') {
+    shelf.filter(s => s.visibility === 'partner' && !s.claimedBy).forEach(s => out.push({ kind:'Shelf', label:s.name, sub:s.code, act:{ t:'shelf', k:s.id } }));
+    PEOPLE.filter(p => shared.includes(p.k)).forEach(p => out.push({ kind:'Person', label:p.n, sub:'Shared researcher record', act:{ t:'record', k:p.k } }));
+    return out;
+  }
   PEOPLE.filter(p => p.tier !== 'alum' || true).forEach(p => {
     if (['ug','phd','pi','partner'].includes(p.tier))
       out.push({ kind:'Become', label:p.n, sub:p.line, act:{ t:'me', k:p.k } });
@@ -4614,6 +4627,7 @@ function App(){
   const [orient, setOrient] = useState(!saved && !route);
   const [tour, setTour] = useState(null);
   const [tourDone, setTourDone] = useState(saved ? !!saved.tourDone : false);
+  const [legacy, setLegacy] = useState(new URLSearchParams(location.search).get('legacy') === '1');
 
   const lens = lensOf(me);
   const scoped = projects.filter(p => lens !== 'sup' ? true : (me.scope === 'all' || (me.projects||[]).includes(p.id)));
@@ -4775,12 +4789,11 @@ function App(){
     if (a.t === 'orient')  setOrient(true);
     if (a.t === 'reset')   { clearState(); location.hash = ''; location.reload(); }
   }
-  const index = buildIndex({ projects, shelf, me, lens });
+  const index = buildIndex({ projects, shelf, me, lens, shared });
   const edges = buildEdges(projects, shelf);
 
-  const active = projects.find(p => p.id === activeId);
-  const item = shelf.find(s => s.id === shelfId);
-  const allDebt = scoped.flatMap(p => debts(p));
+  const active = lens === 'partner' ? null : projects.find(p => p.id === activeId);
+  const item = shelf.find(s => s.id === shelfId && (lens !== 'partner' || (s.visibility === 'partner' && !s.claimedBy)));
   /* every figure in the ticker must describe the SAME scope the reader can open,
      or a mentor sees an entry count from projects they cannot reach */
   const openShelf = shelfScoped.filter(s => !s.claimedBy);
@@ -4800,6 +4813,21 @@ function App(){
        openShelf.length + ' shelved',
        nextDep ? daysUntil(nextDep.departs) + 'd to next departure' : 'no departures queued'];
 
+  if (!legacy && lens !== 'partner') {
+    return <ResearchWorkspace projects={projects} me={me} onIdentityChange={setMe} shelf={shelf}
+      onPublishEntries={(pid, entries) => {
+        if (!['pi', 'phd'].includes(me.tier) || !(me.scope === 'all' || (me.projects || []).includes(pid))) return;
+        setProjects(ps => ps.map(p => p.id !== pid ? p : { ...p, log:[...p.log, ...entries.filter(e => !p.log.some(old => old.id === e.id))] }));
+      }}
+      onOpenLegacy={(nextView, id) => {
+        setLegacy(true);
+        const url = new URL(location.href); url.searchParams.set('legacy', '1'); history.replaceState(null, '', url);
+        setView(nextView || 'register');
+        if (id) { setActiveId(id); setShelfId(id); setRecordOf(id); setOnboardId(id); }
+        setOrient(false); setTourDone(true);
+      }} />;
+  }
+  const partnerAllowed = ['partnerShelf', 'partnerTalent', 'shelfitem', 'record'].includes(view);
   return (
     <NavCtx.Provider value={{ openRecord, open, openItem }}>
     <div className="min-h-screen">
@@ -4811,7 +4839,10 @@ function App(){
       {tour !== null && <TourBar step={tour} setStep={goTour} onExit={() => setTour(null)} />}
       {!orient && tour === null && !tourDone &&
         <TourOffer onStart={() => goTour(0)} onDismiss={() => setTourDone(true)} />}
+      <a href={location.pathname} className="block px-8 py-3 text-sm underline">Open the new research workspace</a>
       <main id="main">
+      {lens === 'partner' && !partnerAllowed && <div className="max-w-[1240px] mx-auto p-8"><h1 className="text-2xl">This view is not shared with partners</h1><button className="underline py-4" onClick={() => setView('partnerShelf')}>View shared projects</button></div>}
+      {(lens !== 'partner' || partnerAllowed) && <React.Fragment>
 
       {view === 'register'  && <SupRegister projects={scoped} me={me} open={open} goOnboard={goOnboard} />}
       {view === 'risk'      && <RiskView projects={scoped} shelf={shelfScoped} me={me} open={open} ack={ack} nudge={nudge} nudged={nudged} />}
@@ -4842,7 +4873,8 @@ function App(){
         <ProfileView me={me} projects={projects} shelf={shelfScoped} profile={myProfile}
           setProfile={setMyProfile} openItem={openItem} open={open} setView={setView} />
       )}
-      {view === 'record'    && (
+      {view === 'record' && lens === 'partner' && !shared.includes(recordOf) && <div className="max-w-[1240px] mx-auto p-8"><h1 className="text-2xl">This researcher record is not shared</h1><button className="underline py-4" onClick={() => setView('partnerTalent')}>View shared researchers</button></div>}
+      {view === 'record' && (lens !== 'partner' || shared.includes(recordOf)) && (
         <RecordView projects={projects} shelf={shelf} me={me} who={recordOf ? byKey(recordOf) : null} openRecord={openRecord}
           shared={shared} toggleShare={toggleShare} open={lens === 'partner' ? null : open}
           partnerLens={lens === 'partner'} />
@@ -4856,6 +4888,7 @@ function App(){
           goOnboard={goOnboard} addEntry={addEntry} ack={ack} open={open} />
       )}
       {view === 'onboard' && <Onboarding projects={projects} initial={onboardId} me={me} openProject={open} onMade={onMade} />}
+      </React.Fragment>}
       </main>
 
       <footer className="border-t hair mt-20" style={tour !== null ? { paddingBottom:150 } : undefined}>
