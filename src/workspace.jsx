@@ -6,6 +6,7 @@ const WS_NAV = [
   ['evidence', 'Evidence'],
   ['reviews', 'Reviews'],
   ['handoffs', 'Handoffs'],
+  ['map', 'Map'],
   ['discover', 'Discover'],
 ];
 
@@ -20,6 +21,10 @@ const WS_PROJECT_TABS = [
 
 const WS_RECORD_TYPES = ['decision', 'method', 'result', 'deadend', 'blocker', 'next'];
 const WS_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function wsWorkspaceNavKey(section){
+  return section === 'project' ? 'projects' : section;
+}
 
 function wsRecordSummary(projects){
   const entries = (projects || []).flatMap(project => Array.isArray(project.log) ? project.log : []).filter(entry => entry && entry.ack !== false);
@@ -308,17 +313,57 @@ function WsRecordVisual({ projects }){
 
 function WsProjectPicker({ projects, selectedId, onSelect, label }){
   if (!projects.length) return null;
+  const buckets = wsProjectBuckets(projects);
   return (
-    <label className="ws-field">
+    <label className="ws-field ws-project-picker">
       <span>{label || 'Project'}</span>
       <select className="ws-select" value={selectedId || ''} onChange={e => onSelect(e.target.value)}>
-        {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+        {!!buckets.active.length && <optgroup label="Active projects">{buckets.active.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</optgroup>}
+        {!!buckets.stashed.length && <optgroup label="Stashed projects">{buckets.stashed.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</optgroup>}
       </select>
     </label>
   );
 }
 
-function WsProjectHome({ project, me, people, onAddEvidence, onOpenHandoff, onTab }){
+function WsWorkspaceTabs({ section, onNavigate }){
+  const activeKey = wsWorkspaceNavKey(section);
+  return (
+    <nav className="ws-workspace-tabs" aria-label="Workspace sections">
+      {WS_NAV.map(([key, label]) => <button type="button" key={key} className={'ws-tab' + (activeKey === key ? ' is-active' : '')} aria-current={activeKey === key ? 'page' : undefined} onClick={() => onNavigate(key)}>{label}</button>)}
+    </nav>
+  );
+}
+
+function WsProjectContext({ project, projectTab, onTab, onProjects }){
+  if (!project) return null;
+  return (
+    <div className="ws-project-context">
+      <div className="ws-breadcrumb"><button type="button" className="ws-link" onClick={onProjects}>Projects</button><span aria-hidden="true">/</span><strong>{project.name}</strong>{wsIsStashed(project) && <WsBadge>Stashed</WsBadge>}</div>
+      <div className="ws-tabs" role="tablist" aria-label="Project sections">
+        {WS_PROJECT_TABS.map(([key, label]) => <button type="button" role="tab" aria-selected={projectTab === key} className={'ws-tab' + (projectTab === key ? ' is-active' : '')} key={key} onClick={() => onTab(key)}>{label}</button>)}
+      </div>
+    </div>
+  );
+}
+
+function WsHeader({ section, project, projectTab, projects, me, identities, onNavigate, onProject, onTab, onIdentity, onOpenLegacy }){
+  return (
+    <header className="ws-shell-header">
+      <div className="ws-header-row">
+        <button type="button" className="ws-brand ws-brand-horizontal" onClick={() => onNavigate('home')} aria-label="URI workspace home"><span>URI</span><small>Research workspace</small></button>
+        <div className="ws-header-controls">
+          <WsProjectPicker projects={projects} selectedId={project ? project.id : ''} onSelect={onProject} label="Current project" />
+          <label className="ws-field ws-identity-picker"><span>Viewing as</span><select className="ws-select" value={me.k} onChange={event => onIdentity(event.target.value)}>{identities.map(person => <option value={person.k} key={person.k}>{person.n}</option>)}</select></label>
+          <button type="button" className="ws-link ws-original-link" onClick={() => onOpenLegacy('register')}>Original prototype</button>
+        </div>
+      </div>
+      <WsWorkspaceTabs section={section} onNavigate={onNavigate} />
+      {section === 'project' && <WsProjectContext project={project} projectTab={projectTab} onTab={onTab} onProjects={() => onNavigate('projects')} />}
+    </header>
+  );
+}
+
+function WsProjectHome({ project, me, people, onAddEvidence, onOpenHandoff, onTab, onOpenMap }){
   const approved = sortedLog(project).filter(e => e.ack !== false);
   const summary = wsRecordSummary([project]);
   const latestResult = approved.find(e => e.t === 'result');
@@ -334,8 +379,8 @@ function WsProjectHome({ project, me, people, onAddEvidence, onOpenHandoff, onTa
         eyebrow={project.code}
         title={project.name}
         subtitle={project.oneLine}
-        metadata={<><WsBadge>{project.status === 'handoff' ? 'Handoff pending' : project.status === 'archived' ? 'Archived' : 'Active'}</WsBadge><span>PI / advisor: {advisor}</span><span>Student lead: {studentLead}</span><span>Private workspace</span></>}
-        actions={<button type="button" className="ws-button ws-button-primary" onClick={onAddEvidence}>Add evidence</button>}
+        metadata={<><WsBadge>{wsIsStashed(project) ? 'Stashed' : project.status === 'handoff' ? 'Handoff pending' : 'Active'}</WsBadge><span>PI / advisor: {advisor}</span><span>Student lead: {studentLead}</span><span>{wsIsStashed(project) && project.stashVisibility === 'lab' ? 'Shared with lab' : 'Private workspace'}</span></>}
+        actions={wsIsStashed(project) ? <><button type="button" className="ws-button ws-button-quiet" onClick={onOpenMap}>Open source map</button><button type="button" className="ws-button ws-button-primary" onClick={onOpenHandoff}>Export archive</button></> : <><button type="button" className="ws-button ws-button-quiet" onClick={onOpenMap}>View connections</button><button type="button" className="ws-button ws-button-primary" onClick={onAddEvidence}>Add evidence</button></>}
         metrics={<><div><strong>{summary.approvedTotal}</strong><span>Approved entries</span></div><div><strong>{approvedNext}</strong><span>Recorded next steps</span></div><div><strong>{summary.latestDate || 'None'}</strong><span>Latest dated update</span></div></>}
       />
       <ResearchProjectSummary key={me.k + ':' + project.id} project={project} me={me} onOpen={() => onTab('research')} />
@@ -404,7 +449,7 @@ function WsProjectEvidence({ project, onAddEvidence }){
   const linked = sortedLog(project).filter(entry => wsEntrySources(entry).length);
   return (
     <>
-      <WsPageHead eyebrow={project.code} title="Evidence" subtitle="Original material and the published statements it supports." actions={<button type="button" className="ws-button ws-button-primary" onClick={onAddEvidence}>Add evidence</button>} />
+      <WsPageHead eyebrow={project.code} title="Evidence" subtitle="Original material and the published statements it supports." actions={!wsIsStashed(project) && <button type="button" className="ws-button ws-button-primary" onClick={onAddEvidence}>Add evidence</button>} />
       <section className="ws-panel">
         <div className="ws-panel-head"><h2>Files of record</h2></div>
         <div className="ws-list">{(project.artifacts || []).map(a => <div className="ws-row" key={a.n}><div><strong>{a.n}</strong><p>{a.d}</p></div></div>)}</div>
@@ -469,14 +514,56 @@ function WsProjectPeople({ project }){
   );
 }
 
-function WsProjectSettings({ project, onOpenLegacy }){
+function WsProjectSettings({ project, me, onOpenLegacy, onStash, onResume, onSetStashVisibility }){
+  const [reason, setReason] = useState('');
+  const [nextStep, setNextStep] = useState('');
+  const [visibility, setVisibility] = useState('private');
+  const [feedback, setFeedback] = useState('');
+  const canManage = wsCanManageProject(project, me);
+
+  function stash(event){
+    event.preventDefault();
+    if (!canManage || typeof onStash !== 'function') return;
+    const result = onStash(project, { reason, nextStep, visibility });
+    setFeedback(result && result.ok ? 'Project stashed. Its record is now read only.' : (result && result.error) || 'The project could not be stashed.');
+  }
+
+  function resume(){
+    if (!canManage || typeof onResume !== 'function') return;
+    const result = onResume(project);
+    setFeedback(result && result.ok ? 'Project resumed. Editing is available again.' : (result && result.error) || 'The project could not be resumed.');
+  }
+
+  function changeVisibility(nextVisibility){
+    if (!canManage || typeof onSetStashVisibility !== 'function') return;
+    const result = onSetStashVisibility(project, nextVisibility);
+    setFeedback(result && result.ok ? (nextVisibility === 'lab' ? 'Archive shared with the lab.' : 'Archive made private.') : (result && result.error) || 'Archive visibility could not be changed.');
+  }
+
   return (
     <>
-      <WsPageHead eyebrow={project.code} title="Settings" subtitle="Prototype access and review rules for this project." />
+      <WsPageHead eyebrow={project.code} title="Settings" subtitle="Manage access, lifecycle, and the durable record for this project." />
+      {feedback && <div className="ws-alert" role="status">{feedback}</div>}
       <section className="ws-panel">
-        <div className="ws-panel-head"><h2>Sharing</h2><WsBadge>Private</WsBadge></div>
-        <p>This browser prototype shows the project only to demo identities assigned to it. A production pilot still requires server-enforced access and persistent accounts.</p>
+        <div className="ws-panel-head"><h2>Sharing</h2><WsBadge>{wsIsStashed(project) && project.stashVisibility === 'lab' ? 'Lab shared' : 'Private'}</WsBadge></div>
+        <p>{wsIsStashed(project) ? 'A lab-shared archive appears in Discover so another researcher can create a linked continuation. The source archive remains unchanged.' : 'This active project is visible only to demo identities assigned to it.'}</p>
+        {wsIsStashed(project) && canManage && <button type="button" className="ws-button ws-button-quiet" onClick={() => changeVisibility(project.stashVisibility === 'lab' ? 'private' : 'lab')}>{project.stashVisibility === 'lab' ? 'Make archive private' : 'Share archive with lab'}</button>}
       </section>
+      {!wsIsStashed(project) && <section className="ws-panel ws-stash-panel">
+        <div className="ws-panel-head"><div><div className="ws-kicker">Reversible lifecycle change</div><h2>Stash this project</h2></div><WsBadge tone="attention">Read-only archive</WsBadge></div>
+        <p>Stashing preserves decisions, evidence, research tracking, people, and source links. The project leaves active work but stays searchable and exportable.</p>
+        {canManage ? <form className="ws-stack" onSubmit={stash} noValidate>
+          <label className="ws-field"><span>Why did work stop?</span><textarea className="ws-textarea" rows="3" value={reason} onChange={event => setReason(event.target.value)} required /></label>
+          <label className="ws-field"><span>Recommended next step</span><textarea className="ws-textarea" rows="3" value={nextStep} onChange={event => setNextStep(event.target.value)} required /></label>
+          <label className="ws-field"><span>Archive visibility</span><select className="ws-select" value={visibility} onChange={event => setVisibility(event.target.value)}><option value="private">Private to assigned team</option><option value="lab">Share with lab in Discover</option></select></label>
+          <div className="ws-actions"><button type="submit" className="ws-button ws-button-primary">Stash project</button></div>
+        </form> : <div className="ws-empty">Only the project PI or assigned PhD mentor can stash this project.</div>}
+      </section>}
+      {wsIsStashed(project) && <section className="ws-panel ws-stash-panel">
+        <div className="ws-panel-head"><div><div className="ws-kicker">{project.stashedOn || project.archivedOn ? 'Stashed ' + new Date(project.stashedOn || project.archivedOn).toLocaleDateString() : 'Stashed project'}</div><h2>Archived project record</h2></div><WsBadge>Read only</WsBadge></div>
+        <dl className="ws-stash-summary"><div><dt>Why work stopped</dt><dd>{project.stashReason || 'No reason recorded.'}</dd></div><div><dt>Recommended next step</dt><dd>{project.stashNextStep || 'No next step recorded.'}</dd></div></dl>
+        {canManage && <div className="ws-actions"><button type="button" className="ws-button ws-button-primary" onClick={resume}>Resume this project</button></div>}
+      </section>}
       <section className="ws-panel">
         <div className="ws-panel-head"><h2>Original prototype</h2></div>
         <p>Open the earlier project view for the map, legacy continuity score, and complete research-journal presentation.</p>
@@ -581,8 +668,11 @@ function WsHome({ projects, me, onOpenProject, onAddEvidence }){
 }
 
 function WsProjects({ projects, query, setQuery, onOpenProject }){
+  const [view, setView] = useState('active');
+  const buckets = wsProjectBuckets(projects);
   const q = query.trim().toLowerCase();
-  const shown = projects.filter(project => {
+  const collection = view === 'stashed' ? buckets.stashed : buckets.active;
+  const shown = collection.filter(project => {
     const projectText = [project.name, project.code, project.field, project.pi, project.oneLine].join(' ');
     const recordText = (project.log || []).map(entry => [entry.h, entry.b, entry.au].join(' ')).join(' ');
     return (projectText + ' ' + recordText).toLowerCase().includes(q);
@@ -590,43 +680,149 @@ function WsProjects({ projects, query, setQuery, onOpenProject }){
   return (
     <>
       <WsPageHead title="Projects" subtitle="Only projects available to the selected demo identity appear here." />
+      <div className="ws-tabs" role="tablist" aria-label="Project lifecycle"><button type="button" role="tab" aria-selected={view === 'active'} className={'ws-tab' + (view === 'active' ? ' is-active' : '')} onClick={() => setView('active')}>Active <span className="ws-count">{buckets.active.length}</span></button><button type="button" role="tab" aria-selected={view === 'stashed'} className={'ws-tab' + (view === 'stashed' ? ' is-active' : '')} onClick={() => setView('stashed')}>Stashed <span className="ws-count">{buckets.stashed.length}</span></button></div>
       <label className="ws-field ws-search"><span>Search accessible projects and records</span><input className="ws-input" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search project names, findings, methods, or authors" /></label>
       <div className="ws-list">
         {shown.map(project => <button type="button" className="ws-row" key={project.id} onClick={() => onOpenProject(project.id)}><div><div className="ws-inline ws-meta"><WsBadge>{project.status}</WsBadge><span>{project.code}</span><span>{project.field}</span></div><strong>{project.name}</strong><p>{project.oneLine}</p></div><span className="ws-meta">{project.log.length} entries</span></button>)}
-        {!shown.length && <div className="ws-empty">No accessible project or published record matches this search.</div>}
+        {!shown.length && <div className="ws-empty">{q ? 'No project or published record matches this search.' : 'No ' + view + ' projects are available.'}</div>}
       </div>
     </>
   );
 }
 
-function WsDiscover({ shelf, me, accessibleIds, onOpenLegacy }){
+const WS_GRAPH_TYPES = [
+  ['project', 'Project'],
+  ['record', 'Record'],
+  ['decision', 'Decision'],
+  ['research', 'Research'],
+  ['artifact', 'Artifact'],
+  ['source', 'Source'],
+];
+
+function WsResearchMap({ projects, scope, onScopeChange, me, onOpenTarget }){
   const [query, setQuery] = useState('');
+  const [types, setTypes] = useState([]);
+  const [includePending, setIncludePending] = useState(false);
+  const [selectedId, setSelectedId] = useState('');
+  const [listView, setListView] = useState(false);
+  const researchItems = useMemo(() => {
+    const storage = wsResearchBrowserStorage(window);
+    if (!storage.ok) return [];
+    const read = wsResearchRead(storage.storage);
+    return (projects || []).flatMap(project => wsResearchCurrent(read.state, project.id));
+  }, [projects]);
+  const graph = useMemo(() => wsBuildResearchGraph(projects, researchItems, { includePending }), [projects, researchItems, includePending]);
+  const filtered = useMemo(() => wsFilterResearchGraph(graph, { scope, query, types }), [graph, scope, query, types]);
+  const positions = useMemo(() => wsLayoutResearchGraph(filtered, 980, 580), [filtered]);
+  const byId = useMemo(() => new Map(positions.map(node => [node.id, node])), [positions]);
+  const selected = byId.get(selectedId) || null;
+  const connected = useMemo(() => {
+    if (!selected) return new Set();
+    const ids = new Set([selected.id]);
+    filtered.edges.forEach(edge => {
+      if (edge.source === selected.id) ids.add(edge.target);
+      if (edge.target === selected.id) ids.add(edge.source);
+    });
+    return ids;
+  }, [selected, filtered]);
+  const canSeePending = ['pi', 'phd'].includes(me.tier);
+
+  function toggleType(type){
+    setTypes(current => current.includes(type) ? current.filter(item => item !== type) : [...current, type]);
+  }
+
+  function activate(node){
+    setSelectedId(node.id);
+  }
+
+  return (
+    <>
+      <WsPageHead eyebrow="Lab knowledge graph" title="Research map" subtitle="Trace how projects, evidence, decisions, research work, files, and named sources connect across the lab." />
+      <section className="ws-map-toolbar" aria-label="Map filters">
+        <label className="ws-field"><span>Scope</span><select className="ws-select" value={scope} onChange={event => onScopeChange(event.target.value)}><option value="all">All lab projects</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}{wsIsStashed(project) ? ' (stashed)' : ''}</option>)}</select></label>
+        <label className="ws-field ws-search"><span>Find a node</span><input className="ws-input" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search sources, decisions, files..." /></label>
+        <button type="button" className="ws-button ws-button-quiet" aria-pressed={listView} onClick={() => setListView(value => !value)}>{listView ? 'Show map' : 'Show list'}</button>
+        {canSeePending && <label className="ws-check"><input type="checkbox" checked={includePending} onChange={event => setIncludePending(event.target.checked)} /><span>Include pending review</span></label>}
+      </section>
+      <div className="ws-map-type-filters" aria-label="Node types">
+        {WS_GRAPH_TYPES.map(([type, label]) => <button type="button" key={type} className={'ws-map-type ws-map-type-' + type + (types.includes(type) ? ' is-active' : '')} aria-pressed={types.includes(type)} onClick={() => toggleType(type)}><span aria-hidden="true" />{label}</button>)}
+      </div>
+      <div className="ws-map-summary" role="status"><strong>{filtered.counts.nodes}</strong> nodes, <strong>{filtered.counts.edges}</strong> connections across <strong>{filtered.counts.projects}</strong> projects</div>
+      {listView ? (
+        <section className="ws-panel ws-map-list" aria-label="Research map as a list">
+          <div className="ws-list">{positions.map(node => <button type="button" className="ws-row" key={node.id} onClick={() => activate(node)}><div><div className="ws-inline ws-meta"><WsBadge>{node.type}</WsBadge>{node.status && <span>{node.status}</span>}</div><strong>{node.label}</strong><p>{node.detail || 'No additional detail recorded.'}</p></div></button>)}{!positions.length && <div className="ws-empty">No nodes match these filters.</div>}</div>
+        </section>
+      ) : (
+        <section className="ws-map-stage" aria-label="Interactive research relationship map">
+          <svg className="ws-map-canvas" viewBox="0 0 980 580" role="img" aria-label={'Research map with ' + filtered.counts.nodes + ' nodes and ' + filtered.counts.edges + ' connections'}>
+            <g className="ws-map-edges">{filtered.edges.map(edge => {
+              const source = byId.get(edge.source);
+              const target = byId.get(edge.target);
+              if (!source || !target) return null;
+              const highlighted = selected && (edge.source === selected.id || edge.target === selected.id);
+              return <line key={edge.id} x1={source.x} y1={source.y} x2={target.x} y2={target.y} className={highlighted ? 'is-highlighted' : ''}><title>{edge.label}</title></line>;
+            })}</g>
+            <g className="ws-map-nodes">{positions.map(node => {
+              const active = node.id === selectedId;
+              const muted = selected && !connected.has(node.id);
+              const radius = node.type === 'project' ? 15 : node.type === 'source' ? 8 : 10;
+              return <g key={node.id} className={'ws-map-node ws-map-node-' + node.type + (active ? ' is-selected' : '') + (muted ? ' is-muted' : '')} role="button" tabIndex="0" aria-label={node.type + ': ' + node.label} onClick={() => activate(node)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(node); } }}>
+                <circle cx={node.x} cy={node.y} r={radius} />
+                <text x={node.x + radius + 5} y={node.y + 4}>{node.label.length > 28 ? node.label.slice(0, 26) + '...' : node.label}</text>
+              </g>;
+            })}</g>
+          </svg>
+          {!positions.length && <div className="ws-map-empty">No nodes match these filters.</div>}
+        </section>
+      )}
+      {selected && <aside className="ws-map-detail" aria-live="polite"><div><div className="ws-inline ws-meta"><WsBadge>{selected.type}</WsBadge>{selected.status && <span>{selected.status}</span>}</div><h2>{selected.label}</h2><p>{selected.detail || 'No additional detail recorded.'}</p></div>{selected.target && <button type="button" className="ws-button ws-button-primary" onClick={() => onOpenTarget(selected.target)}>Open record</button>}</aside>}
+      {!!graph.warnings.length && <details className="ws-map-warnings"><summary>{graph.warnings.length} unresolved connection{graph.warnings.length === 1 ? '' : 's'} skipped</summary><ul>{graph.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details>}
+    </>
+  );
+}
+
+function WsDiscover({ shelf, projects, me, accessibleIds, onOpenLegacy, onContinue }){
+  const [query, setQuery] = useState('');
+  const [feedback, setFeedback] = useState('');
   const available = (shelf || []).filter(item => me.scope === 'all' || accessibleIds.has(item.parent) || item.shelvedBy === me.k).filter(item => !item.claimedBy);
-  const shown = available.filter(item => [item.name, item.oneLine, item.field, item.reasonText].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
+  const sharedProjects = (projects || []).filter(project => wsIsStashed(project) && project.stashVisibility === 'lab');
+  const q = query.trim().toLowerCase();
+  const shown = available.filter(item => [item.name, item.oneLine, item.field, item.reasonText].join(' ').toLowerCase().includes(q));
+  const shownArchives = sharedProjects.filter(project => [project.name, project.oneLine, project.field, project.stashReason, project.stashNextStep].join(' ').toLowerCase().includes(q));
+
+  function continueArchive(project){
+    if (typeof onContinue !== 'function') return;
+    const result = onContinue(project);
+    setFeedback(result && result.ok ? 'Created a linked active continuation from ' + project.code + '.' : (result && result.error) || 'The continuation could not be created.');
+  }
   return (
     <>
       <WsPageHead eyebrow="The Shelf" title="Discover paused work" subtitle="Projects with existing work, a reason they stopped, and recorded next steps." actions={<button type="button" className="ws-button ws-button-quiet" onClick={() => onOpenLegacy('shelf')}>Open original Shelf</button>} />
       <label className="ws-field ws-search"><span>Search material you can access</span><input className="ws-input" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search shelved projects" /></label>
+      {feedback && <div className="ws-alert" role="status">{feedback}</div>}
+      {!!shownArchives.length && <><div className="ws-section-heading"><div><div className="ws-kicker">Shared archives</div><h2>Continue a stashed lab project</h2></div></div><div className="ws-grid ws-grid-two">{shownArchives.map(project => <article className="ws-panel" key={project.id}><div className="ws-panel-head"><div><div className="ws-kicker">{project.code}</div><h2>{project.name}</h2></div><WsBadge>Stashed</WsBadge></div><p>{project.oneLine}</p><dl className="ws-stash-summary"><div><dt>Why it stopped</dt><dd>{project.stashReason}</dd></div><div><dt>Next step</dt><dd>{project.stashNextStep}</dd></div></dl><button type="button" className="ws-button ws-button-primary" onClick={() => continueArchive(project)}>Continue as new project</button></article>)}</div></>}
+      <div className="ws-section-heading"><div><div className="ws-kicker">Legacy shelf</div><h2>Prepared revival briefs</h2></div></div>
       <div className="ws-grid ws-grid-two">
         {shown.map(item => <article className="ws-panel" key={item.id}><div className="ws-panel-head"><div><div className="ws-kicker">{item.code}</div><h2>{item.name}</h2></div><WsBadge>{item.visibility === 'partner' ? 'Partner listed' : 'Internal'}</WsBadge></div><p>{item.oneLine}</p><div className="ws-inline ws-meta"><span>{(item.built || []).length} established findings</span><span>{(item.remaining || []).length} next steps</span></div><button type="button" className="ws-button ws-button-quiet" onClick={() => onOpenLegacy('shelfitem', item.id)}>Read revival brief</button></article>)}
       </div>
-      {!shown.length && <div className="ws-empty">No accessible shelved project matches this search.</div>}
+      {!shown.length && !shownArchives.length && <div className="ws-empty">No accessible shelved project or shared archive matches this search.</div>}
     </>
   );
 }
 
-function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, shelf, onOpenLegacy }){
+function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, shelf, onOpenLegacy, onStash, onResume, onSetStashVisibility, onContinue }){
   const initial = wsReadState(me.k);
   const accessibleProjects = useMemo(() => (projects || []).filter(project => me.scope === 'all' || (me.projects || []).includes(project.id)), [projects, me]);
+  const projectBuckets = useMemo(() => wsProjectBuckets(accessibleProjects), [accessibleProjects]);
   const accessibleIds = useMemo(() => new Set(accessibleProjects.map(project => project.id)), [accessibleProjects]);
-  const firstId = accessibleProjects[0] ? accessibleProjects[0].id : '';
+  const firstId = projectBuckets.active[0] ? projectBuckets.active[0].id : (accessibleProjects[0] ? accessibleProjects[0].id : '');
   const [section, setSection] = useState(initial.section || 'home');
   const [selectedProjectId, setSelectedProjectId] = useState(initial.selectedProjectId || firstId);
   const [projectTab, setProjectTab] = useState(initial.projectTab || 'overview');
   const [query, setQuery] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [mapScope, setMapScope] = useState('all');
   const identityRef = useRef(me.k);
-  const selectedProject = accessibleProjects.find(project => project.id === selectedProjectId) || accessibleProjects[0] || null;
+  const selectedProject = accessibleProjects.find(project => project.id === selectedProjectId) || accessibleProjects.find(project => project.id === firstId) || null;
   const identities = PEOPLE.filter(person => person.tier !== 'partner');
 
   useEffect(() => {
@@ -634,7 +830,9 @@ function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, s
     identityRef.current = me.k;
     const saved = wsReadState(me.k);
     setSection(saved.section || 'home');
-    setSelectedProjectId(saved.selectedProjectId || ((projects || []).find(project => me.scope === 'all' || (me.projects || []).includes(project.id)) || {}).id || '');
+    const nextProjects = (projects || []).filter(project => me.scope === 'all' || (me.projects || []).includes(project.id));
+    const nextBuckets = wsProjectBuckets(nextProjects);
+    setSelectedProjectId(saved.selectedProjectId || ((nextBuckets.active[0] || nextProjects[0]) || {}).id || '');
     setProjectTab(saved.projectTab || 'overview');
     setQuery('');
   }, [me.k, me.scope, me.projects, projects]);
@@ -650,11 +848,14 @@ function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, s
     } catch (_) {}
   }, [section, selectedProjectId, projectTab, me.k]);
 
+  React.useLayoutEffect(() => {
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [section, selectedProjectId, projectTab]);
+
   function navigate(nextSection){
     setSection(nextSection);
-    setMenuOpen(false);
-    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    window.scrollTo({ top:0, behavior:reduceMotion ? 'auto' : 'smooth' });
+    window.scrollTo(0, 0);
   }
 
   function openProject(id, tab){
@@ -664,9 +865,27 @@ function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, s
     navigate('project');
   }
 
+  function selectProject(id){
+    if (!accessibleIds.has(id)) return;
+    setSelectedProjectId(id);
+    if (section !== 'project') navigate('project');
+  }
+
   function openEvidence(id){
     if (id && accessibleIds.has(id)) setSelectedProjectId(id);
     navigate('evidence');
+  }
+
+  function openMap(id){
+    if (id && accessibleIds.has(id)) setSelectedProjectId(id);
+    setMapScope(id && accessibleIds.has(id) ? id : 'all');
+    setSection('map');
+    window.scrollTo(0, 0);
+  }
+
+  function openMapTarget(target){
+    if (!target || !accessibleIds.has(target.projectId)) return;
+    openProject(target.projectId, target.projectTab || 'overview');
   }
 
   function handlePublished(projectId, entries){
@@ -676,35 +895,26 @@ function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, s
     navigate('project');
   }
 
+  function handleContinue(project){
+    if (typeof onContinue !== 'function') return { ok:false, error:'Project continuation is unavailable.' };
+    const result = onContinue(project);
+    if (result && result.ok && result.project) {
+      setSelectedProjectId(result.project.id);
+      setProjectTab('overview');
+      setSection('project');
+      window.scrollTo(0, 0);
+    }
+    return result;
+  }
+
   const safeOpenLegacy = onOpenLegacy || (() => {});
 
   return (
-    <div className={'ws-app' + (menuOpen ? ' menu-open' : '')}>
+    <div className="ws-app">
       <a className="skip" href="#workspace-main">Skip to workspace content</a>
-      <button type="button" className="ws-mobile-menu" aria-expanded={menuOpen} aria-controls="workspace-navigation" onClick={() => setMenuOpen(open => !open)}>Menu</button>
-      {menuOpen && <button type="button" className="ws-drawer-backdrop" aria-label="Close menu" onClick={() => setMenuOpen(false)} />}
-      <aside id="workspace-navigation" className={'ws-sidebar' + (menuOpen ? ' is-open' : '')}>
-        <div className="ws-sidebar-head">
-          <button type="button" className="ws-brand" onClick={() => navigate('home')} aria-label="URI workspace home"><span>URI</span><small>Research workspace</small></button>
-        </div>
-        <nav className="ws-nav" aria-label="Workspace">
-          <div className="ws-nav-label">Workspace</div>
-          {WS_NAV.map(([key, label]) => <button type="button" key={key} className={'ws-nav-item' + (section === key ? ' is-active' : '')} aria-current={section === key ? 'page' : undefined} onClick={() => navigate(key)}><WsIcon name={key} /><span>{label}</span></button>)}
-          {accessibleProjects.length > 0 && <><div className="ws-nav-label">Projects</div>{accessibleProjects.map(project => <button type="button" className={'ws-nav-item' + (section === 'project' && selectedProject && selectedProject.id === project.id ? ' is-active' : '')} key={project.id} onClick={() => openProject(project.id)}><span>{project.name}</span><small>{project.code}</small></button>)}</>}
-        </nav>
-        <div className="ws-sidebar-foot">
-          <label className="ws-field ws-demo"><span>Demo identity</span><select className="ws-select" value={me.k} onChange={e => { const person = byKey(e.target.value); if (person && onIdentityChange) onIdentityChange(person); }}>{identities.map(person => <option value={person.k} key={person.k}>{person.n}</option>)}</select></label>
-          <div className="ws-inline"><span className="ws-avatar" aria-hidden="true">{me.i}</span><div><strong>{me.n}</strong><div className="ws-meta">{me.line}</div></div></div>
-          <button type="button" className="ws-link" onClick={() => safeOpenLegacy('register')}>Original prototype</button>
-        </div>
-      </aside>
-      <div className="ws-main">
-        <header className="ws-topbar">
-          <div><div className="ws-topbar-title">{section === 'project' && selectedProject ? selectedProject.name : (WS_NAV.find(item => item[0] === section) || ['', 'Project'])[1]}</div><div className="ws-topbar-meta">Demo workspace - browser-stored data</div></div>
-          {accessibleProjects.length > 0 && !['evidence', 'reviews'].includes(section) && <WsProjectPicker projects={accessibleProjects} selectedId={selectedProject ? selectedProject.id : firstId} onSelect={id => openProject(id)} label="Current project" />}
-        </header>
-        <main id="workspace-main" className="ws-content">
-          {section === 'home' && <WsHome projects={accessibleProjects} me={me} onOpenProject={openProject} onAddEvidence={openEvidence} />}
+      <WsHeader section={section} project={selectedProject} projectTab={projectTab} projects={accessibleProjects} me={me} identities={identities} onNavigate={key => key === 'map' ? openMap() : navigate(key)} onProject={selectProject} onTab={setProjectTab} onIdentity={key => { const person = byKey(key); if (person && onIdentityChange) onIdentityChange(person); }} onOpenLegacy={safeOpenLegacy} />
+      <main id="workspace-main" className="ws-content">
+          {section === 'home' && <WsHome projects={projectBuckets.active} me={me} onOpenProject={openProject} onAddEvidence={openEvidence} />}
           {section === 'projects' && <WsProjects projects={accessibleProjects} query={query} setQuery={setQuery} onOpenProject={openProject} />}
           {(section === 'evidence' || section === 'reviews') && (
             accessibleProjects.length
@@ -712,21 +922,21 @@ function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, s
               : <div className="ws-empty">This demo identity has no accessible project for evidence or review.</div>
           )}
           {section === 'handoffs' && (selectedProject ? <><WsProjectPicker projects={accessibleProjects} selectedId={selectedProject.id} onSelect={setSelectedProjectId} label="Handoff project" /><WsHandoff project={selectedProject} /></> : <div className="ws-empty">This demo identity has no accessible project to hand off.</div>)}
-          {section === 'discover' && <WsDiscover shelf={shelf || []} me={me} accessibleIds={accessibleIds} onOpenLegacy={safeOpenLegacy} />}
+          {section === 'map' && <WsResearchMap projects={accessibleProjects} scope={mapScope} onScopeChange={setMapScope} me={me} onOpenTarget={openMapTarget} />}
+          {section === 'discover' && <WsDiscover shelf={shelf || []} projects={projects || []} me={me} accessibleIds={accessibleIds} onOpenLegacy={safeOpenLegacy} onContinue={handleContinue} />}
           {section === 'project' && selectedProject && (
             <>
-              <div className="ws-tabs" role="tablist" aria-label="Project sections">{WS_PROJECT_TABS.map(([key, label]) => <button type="button" role="tab" aria-selected={projectTab === key} className={'ws-tab' + (projectTab === key ? ' is-active' : '')} key={key} onClick={() => setProjectTab(key)}>{label}</button>)}</div>
-              {projectTab === 'overview' && <WsProjectHome project={selectedProject} me={me} people={PEOPLE} onAddEvidence={() => openEvidence(selectedProject.id)} onOpenHandoff={() => navigate('handoffs')} onTab={setProjectTab} />}
+              {wsIsStashed(selectedProject) && <div className="ws-stashed-banner" role="status"><div><strong>This project is stashed and read only.</strong><span>{selectedProject.stashReason || 'Its full record remains available for reference and export.'}</span></div><div className="ws-actions"><button type="button" className="ws-button ws-button-quiet" onClick={() => openMap(selectedProject.id)}>View connections</button><button type="button" className="ws-button ws-button-quiet" onClick={() => navigate('handoffs')}>Export archive</button></div></div>}
+              {projectTab === 'overview' && <WsProjectHome project={selectedProject} me={me} people={PEOPLE} onAddEvidence={() => openEvidence(selectedProject.id)} onOpenHandoff={() => navigate('handoffs')} onTab={setProjectTab} onOpenMap={() => openMap(selectedProject.id)} />}
               {projectTab === 'research' && <ResearchProjectWorkspace key={me.k + ':' + selectedProject.id} project={selectedProject} me={me} people={PEOPLE} />}
               {projectTab === 'record' && <WsProjectRecord project={selectedProject} />}
               {projectTab === 'evidence' && <WsProjectEvidence project={selectedProject} onAddEvidence={() => openEvidence(selectedProject.id)} />}
               {projectTab === 'people' && <WsProjectPeople project={selectedProject} />}
-              {projectTab === 'settings' && <WsProjectSettings project={selectedProject} onOpenLegacy={safeOpenLegacy} />}
+              {projectTab === 'settings' && <WsProjectSettings project={selectedProject} me={me} onOpenLegacy={safeOpenLegacy} onStash={onStash} onResume={onResume} onSetStashVisibility={onSetStashVisibility} />}
             </>
           )}
           {section === 'project' && !selectedProject && <div className="ws-empty">Choose a demo identity with access to a project.</div>}
-        </main>
-      </div>
+      </main>
     </div>
   );
 }

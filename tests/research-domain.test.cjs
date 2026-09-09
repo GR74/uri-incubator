@@ -166,6 +166,14 @@ test('edit policy requires project access and author or PI/PhD reviewer status',
   assert.equal(context.wsResearchCanEdit(item, student, { ...project, id: 'p2' }), false);
 });
 
+test('stashed projects are readable but never editable', () => {
+  const item = { projectId:'p1', kind:'task', authorKey:'student', ownerKey:'student' };
+  const stashed = { ...project, status:'stashed' };
+  assert.equal(context.wsResearchCanEdit(item, student, stashed), false);
+  assert.equal(context.wsResearchCanEdit(item, mentor, stashed), false);
+  assert.equal(context.wsResearchCanEdit(item, people[3], stashed), false);
+});
+
 test('assigned owners can update operational work but not another authors measurement', () => {
   const assignedTask = save(
     context.wsResearchEmpty(),

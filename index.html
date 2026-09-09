@@ -2764,6 +2764,408 @@ a.ws-row:hover {
   }
 }
 
+/* Persistent horizontal workspace and project navigation. */
+.ws-app {
+  padding-left: 0;
+}
+
+.ws-shell-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid var(--ws-rule-strong);
+  background: rgba(244, 245, 246, 0.96);
+  box-shadow: 0 8px 24px rgba(33, 35, 37, 0.06);
+  backdrop-filter: blur(16px);
+}
+
+.ws-header-row,
+.ws-workspace-tabs,
+.ws-project-context {
+  width: min(100%, var(--ws-content-width));
+  margin: 0 auto;
+  padding-right: clamp(22px, 4vw, 56px);
+  padding-left: clamp(22px, 4vw, 56px);
+}
+
+.ws-header-row {
+  display: flex;
+  min-height: 74px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 26px;
+}
+
+button.ws-brand-horizontal {
+  width: auto;
+  min-width: max-content;
+  color: var(--ws-ink);
+}
+
+.ws-brand-horizontal > span {
+  color: var(--ws-scarlet);
+  font-size: 28px;
+}
+
+.ws-brand-horizontal > small {
+  color: var(--ws-muted);
+}
+
+.ws-header-controls {
+  display: flex;
+  min-width: 0;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 14px;
+}
+
+.ws-header-controls .ws-field {
+  min-width: min(28vw, 320px);
+}
+
+.ws-header-controls .ws-identity-picker {
+  min-width: min(22vw, 250px);
+}
+
+.ws-header-controls .ws-field > span {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ws-original-link {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+.ws-workspace-tabs {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  border-top: 1px solid var(--ws-rule);
+}
+
+.ws-workspace-tabs .ws-tab {
+  min-height: 50px;
+}
+
+.ws-project-context {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.75fr) minmax(0, 1.25fr);
+  align-items: end;
+  gap: 28px;
+  border-top: 1px solid var(--ws-rule);
+  background: #FFFFFF;
+}
+
+.ws-project-context .ws-tabs {
+  justify-content: flex-end;
+  border-bottom: 0;
+}
+
+.ws-breadcrumb {
+  display: flex;
+  min-width: 0;
+  min-height: 54px;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+}
+
+.ws-breadcrumb strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Research graph. */
+.ws-map-toolbar {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.65fr) minmax(260px, 1fr) auto auto;
+  align-items: end;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--ws-rule);
+  border-radius: var(--ws-radius);
+  background: #FFFFFF;
+}
+
+.ws-check {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  color: var(--ws-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ws-map-type-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ws-map-type {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 11px;
+  border: 1px solid var(--ws-rule-strong);
+  border-radius: 999px;
+  background: #FFFFFF;
+  color: var(--ws-muted);
+  cursor: pointer;
+}
+
+.ws-map-type > span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ws-map-color, var(--ws-gray));
+}
+
+.ws-map-type.is-active {
+  border-color: var(--ws-map-color, var(--ws-scarlet));
+  background: var(--ws-scarlet-soft);
+  color: var(--ws-ink);
+}
+
+.ws-map-type-project { --ws-map-color: #BA0C2F; }
+.ws-map-type-record { --ws-map-color: #546A76; }
+.ws-map-type-decision { --ws-map-color: #8F4A6A; }
+.ws-map-type-research { --ws-map-color: #397367; }
+.ws-map-type-artifact { --ws-map-color: #956C28; }
+.ws-map-type-source { --ws-map-color: #66717A; }
+
+.ws-map-summary {
+  color: var(--ws-muted);
+  font-size: 14px;
+}
+
+.ws-map-stage {
+  position: relative;
+  overflow: auto;
+  border: 1px solid var(--ws-rule-strong);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(186, 12, 47, 0.08), transparent 34%),
+    linear-gradient(rgba(167, 177, 183, 0.11) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(167, 177, 183, 0.11) 1px, transparent 1px),
+    #FBFCFC;
+  background-size: auto, 28px 28px, 28px 28px, auto;
+  box-shadow: var(--ws-shadow);
+}
+
+.ws-map-canvas {
+  display: block;
+  width: 100%;
+  min-width: 780px;
+  min-height: 500px;
+}
+
+.ws-map-edges line {
+  stroke: #BCC4C8;
+  stroke-width: 1.25;
+}
+
+.ws-map-edges line.is-highlighted {
+  stroke: var(--ws-scarlet);
+  stroke-width: 2.5;
+}
+
+.ws-map-node {
+  cursor: pointer;
+  transition: opacity 140ms ease;
+}
+
+.ws-map-node circle {
+  fill: #546A76;
+  stroke: #FFFFFF;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 3px 5px rgba(33, 35, 37, 0.18));
+}
+
+.ws-map-node-project circle { fill: #BA0C2F; }
+.ws-map-node-decision circle { fill: #8F4A6A; }
+.ws-map-node-research circle { fill: #397367; }
+.ws-map-node-artifact circle { fill: #956C28; }
+.ws-map-node-source circle { fill: #66717A; }
+.ws-map-node.is-selected circle { stroke: #212325; stroke-width: 4; }
+.ws-map-node.is-muted { opacity: 0.2; }
+
+.ws-map-node text {
+  fill: var(--ws-ink);
+  font-family: var(--ws-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: #FBFCFC;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.ws-map-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px;
+  border-left: 4px solid var(--ws-scarlet);
+  border-radius: 0 var(--ws-radius) var(--ws-radius) 0;
+  background: #FFFFFF;
+  box-shadow: var(--ws-shadow);
+}
+
+.ws-map-detail h2 {
+  margin: 5px 0;
+  font-family: var(--ws-font-serif);
+  font-size: 26px;
+}
+
+.ws-map-detail p { margin: 0; }
+.ws-map-warnings { color: var(--ws-muted); font-size: 14px; }
+.ws-map-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ws-muted); }
+
+.ws-count {
+  display: inline-grid;
+  min-width: 22px;
+  height: 22px;
+  margin-left: 5px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--ws-soft);
+  color: var(--ws-muted);
+  font-size: 12px;
+}
+
+.ws-stashed-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  border: 1px solid #D9B76B;
+  border-left: 4px solid var(--ws-warning);
+  border-radius: 0 var(--ws-radius) var(--ws-radius) 0;
+  background: var(--ws-warning-soft);
+}
+
+.ws-stashed-banner > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.ws-stashed-banner span {
+  color: var(--ws-muted);
+}
+
+.ws-stash-panel {
+  border-color: #D9B76B;
+}
+
+.ws-stash-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  margin: 18px 0;
+  border: 1px solid var(--ws-rule);
+  border-radius: 8px;
+  background: var(--ws-rule);
+}
+
+.ws-stash-summary > div {
+  padding: 15px;
+  background: #FFFFFF;
+}
+
+.ws-stash-summary dt {
+  color: var(--ws-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.ws-stash-summary dd {
+  margin: 6px 0 0;
+}
+
+.ws-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  margin-top: 36px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ws-rule-strong);
+}
+
+.ws-section-heading h2 {
+  margin: 0;
+  font-family: var(--ws-font-serif);
+  font-size: 28px;
+}
+
+@media (max-width: 900px) {
+  .ws-header-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .ws-header-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ws-header-controls .ws-field,
+  .ws-header-controls .ws-identity-picker {
+    min-width: 0;
+  }
+
+  .ws-project-context {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .ws-project-context .ws-tabs {
+    justify-content: flex-start;
+  }
+
+  .ws-map-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .ws-header-controls,
+  .ws-map-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ws-original-link {
+    justify-self: start;
+  }
+
+  .ws-map-detail {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ws-stashed-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ws-stash-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ws-app *,
   .ws-app *::before,
@@ -3888,6 +4290,7 @@ function wsResearchHasProjectAccess(me, project) {
 function wsResearchCanEdit(item, me, project) {
   try {
     if (!wsResearchIsObject(item) || !wsResearchHasProjectAccess(me, project)) return false;
+    if (project.status === 'stashed' || project.status === 'archived') return false;
     if (item.projectId !== project.id || !wsResearchNonblank(me.k)) return false;
     const assignedOperationalOwner = item.ownerKey === me.k && ['task', 'experiment', 'milestone'].includes(item.kind);
     return item.authorKey === me.k || assignedOperationalOwner || me.tier === 'pi' || me.tier === 'phd';
@@ -4578,6 +4981,7 @@ function ResearchProjectSummary({
   onOpen
 }) {
   if (!wsResearchHasProjectAccess(me, project)) return null;
+  const readOnly = project.status === 'stashed' || project.status === 'archived';
   const storageResult = wsResearchBrowserStorage(typeof window === 'undefined' ? null : window);
   const read = storageResult.ok ? wsResearchRead(storageResult.storage) : {
     state: wsResearchEmpty(),
@@ -4605,17 +5009,18 @@ function ResearchProjectSummary({
     className: "ws-research-summary-stats"
   }, React.createElement("div", null, React.createElement("strong", null, summary.completed, "/", summary.workTotal), React.createElement("span", null, "Tracked work completed")), React.createElement("div", null, React.createElement("strong", null, summary.inProgress), React.createElement("span", null, "In progress")), React.createElement("div", null, React.createElement("strong", null, summary.blocked), React.createElement("span", null, "Blocked")), React.createElement("div", null, React.createElement("strong", null, summary.measurementTotal), React.createElement("span", null, "Measurements"))) : React.createElement("p", {
     className: "ws-research-summary-empty"
-  }, "No operational tracking records yet. Add the first task, experiment, milestone, or measurement."), React.createElement("button", {
+  }, readOnly ? 'No operational tracking records were archived for this project.' : 'No operational tracking records yet. Add the first task, experiment, milestone, or measurement.'), React.createElement("button", {
     type: "button",
     className: "ws-button ws-button-quiet",
     onClick: onOpen
-  }, summary.workTotal || summary.measurementTotal ? 'Open Research' : 'Add first record'));
+  }, readOnly || summary.workTotal || summary.measurementTotal ? 'Open Research' : 'Add first record'));
 }
 function ResearchProjectWorkspace({
   project,
   me,
   people
 }) {
+  const readOnly = project.status === 'stashed' || project.status === 'archived';
   const initialRef = React.useRef(null);
   if (initialRef.current === null) {
     const storageResult = wsResearchBrowserStorage(typeof window === 'undefined' ? null : window);
@@ -4669,6 +5074,10 @@ function ResearchProjectWorkspace({
     if (target && typeof target.focus === 'function') target.focus();
   }
   function startCreate(kind) {
+    if (readOnly) {
+      setFeedback('This project is stashed. Its research tracking is read only until the project is resumed.');
+      return;
+    }
     if (storageBlocked) {
       setFeedback('Research actions are blocked until local storage can be read safely.');
       return;
@@ -4700,6 +5109,11 @@ function ResearchProjectWorkspace({
   }
   function saveForm(event) {
     event.preventDefault();
+    if (readOnly) {
+      setFormError('This project is stashed. Resume it before changing research tracking.');
+      focusError('');
+      return;
+    }
     if (!wsResearchHasProjectAccess(me, project)) {
       setFormError('This project is not available to the current identity. No change was made.');
       focusError('');
@@ -4795,10 +5209,13 @@ function ResearchProjectWorkspace({
     role: "alert",
     tabIndex: "-1",
     ref: storageAlertRef
-  }, React.createElement("strong", null, "Local research storage needs attention."), React.createElement("span", null, storageError), React.createElement("span", null, "Saved data was not replaced. Save and export actions are blocked when the stored state cannot be read.")), feedback && React.createElement("div", {
+  }, React.createElement("strong", null, "Local research storage needs attention."), React.createElement("span", null, storageError), React.createElement("span", null, "Saved data was not replaced. Save and export actions are blocked when the stored state cannot be read.")), readOnly && React.createElement("div", {
     className: "ws-alert",
     role: "status"
-  }, feedback), React.createElement("section", {
+  }, React.createElement("strong", null, "Archived research tracking"), React.createElement("span", null, "This record remains searchable and exportable, but it cannot be changed while the project is stashed.")), feedback && React.createElement("div", {
+    className: "ws-alert",
+    role: "status"
+  }, feedback), !readOnly && React.createElement("section", {
     className: "ws-research-create",
     "aria-label": "Create a research tracking record"
   }, React.createElement("div", null, React.createElement("h2", null, "Add team-entered tracking"), React.createElement("p", null, "Enter only work or measurements the team explicitly recorded. Publishing research knowledge still happens through Add evidence.")), React.createElement("div", {
@@ -4809,7 +5226,7 @@ function ResearchProjectWorkspace({
     disabled: storageBlocked,
     key: option[0],
     onClick: () => startCreate(option[0])
-  }, "Add ", option[1].toLowerCase())))), form && React.createElement("form", {
+  }, "Add ", option[1].toLowerCase())))), form && !readOnly && React.createElement("form", {
     className: "ws-panel ws-research-form",
     onSubmit: saveForm,
     noValidate: true
@@ -5499,6 +5916,7 @@ function EvidenceWorkspace({
   const authorizedKey = (projects || []).map(project => project.id).join('|');
   const reviewer = wsCanReview(me);
   const activeProject = (projects || []).find(project => project.id === projectId) || null;
+  const activeProjectReadOnly = !!activeProject && (activeProject.status === 'stashed' || activeProject.status === 'archived');
   const activeRecord = evidenceState.records.find(record => record.id === activeRecordId) || null;
   const visibleRecords = evidenceState.records.filter(record => canReadRecord(record));
   const projectRecords = visibleRecords.filter(record => record.projectId === projectId);
@@ -5511,6 +5929,9 @@ function EvidenceWorkspace({
   React.useEffect(() => {
     if (!authorizedIds.has(projectId)) setProjectId(firstProjectId);
   }, [authorizedKey, projectId, firstProjectId]);
+  React.useEffect(() => {
+    if (activeProjectReadOnly && !['drafts', 'reviews', 'review'].includes(section)) setSection(mode === 'reviews' ? 'reviews' : 'drafts');
+  }, [activeProjectReadOnly, mode, section]);
   React.useEffect(() => {
     if (storageBlocked) return;
     const result = wsSaveEvidenceState(evidenceState);
@@ -5528,6 +5949,14 @@ function EvidenceWorkspace({
       return false;
     }
     return true;
+  }
+  function assertWritable(targetProjectId) {
+    const target = (projects || []).find(project => project.id === targetProjectId);
+    if (target && (target.status === 'stashed' || target.status === 'archived')) {
+      setFeedback('This project is stashed. Its evidence remains readable, but changes require resuming the project.');
+      return false;
+    }
+    return assertAuthorized(targetProjectId);
   }
   function canReadRecord(record) {
     if (!record || !authorizedIds.has(record.projectId)) return false;
@@ -5549,7 +5978,7 @@ function EvidenceWorkspace({
   function updateAuthoredRecord(recordId, updater) {
     setEvidenceState(current => {
       const record = current.records.find(item => item.id === recordId);
-      if (!record || !authorizedIds.has(record.projectId) || record.authorKey !== me.k || record.status === 'published') {
+      if (!record || !assertWritable(record.projectId) || record.authorKey !== me.k || record.status === 'published') {
         setFeedback('You cannot edit this draft. No change was made.');
         return current;
       }
@@ -5567,7 +5996,7 @@ function EvidenceWorkspace({
     });
   }
   function startManualRecord() {
-    if (!activeProject || !assertAuthorized(activeProject.id)) return;
+    if (!activeProject || !assertWritable(activeProject.id)) return;
     const record = wsCreateRecord(activeProject.id, me, 'manual', '');
     setEvidenceState(current => ({
       ...current,
@@ -5604,6 +6033,7 @@ function EvidenceWorkspace({
     setFeedback('Review every included entry before you submit it.');
   }
   function addFiles(fileList) {
+    if (!activeProject || !assertWritable(activeProject.id)) return;
     const existingFiles = visibleRecords.flatMap(record => record.files.map(file => ({
       record,
       file
@@ -5646,7 +6076,7 @@ function EvidenceWorkspace({
     setUploadFiles(current => current.filter(file => file.id !== fileId));
   }
   async function analyzeFiles(onlyIds) {
-    if (!activeProject || !assertAuthorized(projectId)) return;
+    if (!activeProject || !assertWritable(projectId)) return;
     const existingGroup = analysisRecordId ? evidenceRef.current.records.find(record => record.id === analysisRecordId) : null;
     if (existingGroup && (existingGroup.authorKey !== me.k || !authorizedIds.has(existingGroup.projectId) || existingGroup.status === 'published')) {
       setFeedback('This analyzed change set can no longer be edited. Start a new upload group.');
@@ -5750,7 +6180,7 @@ function EvidenceWorkspace({
     }));
   }
   function requestReview(record) {
-    if (!assertAuthorized(record.projectId) || record.authorKey !== me.k || record.status !== 'draft') return;
+    if (!assertWritable(record.projectId) || record.authorKey !== me.k || record.status !== 'draft') return;
     const entries = wsEntriesForPublish(record, new Date().toISOString().slice(0, 10));
     if (!entries.length) {
       setFeedback('Include at least one complete entry before requesting review.');
@@ -5772,7 +6202,7 @@ function EvidenceWorkspace({
     setFeedback('Revision ' + record.revision + ' was submitted for review. Nothing has been published.');
   }
   function requestChanges(record) {
-    if (!reviewer || record.authorKey === me.k || !assertAuthorized(record.projectId) || record.status !== 'pending') return;
+    if (!reviewer || record.authorKey === me.k || !assertWritable(record.projectId) || record.status !== 'pending') return;
     if (!reviewComment.trim()) {
       setFeedback('Add a specific review comment before requesting changes.');
       return;
@@ -5799,7 +6229,7 @@ function EvidenceWorkspace({
     setFeedback('Changes were requested. The author must submit a new revision.');
   }
   function publishRecord(record, approval) {
-    if (!record || publishing.current.has(record.id) || !assertAuthorized(record.projectId)) return;
+    if (!record || publishing.current.has(record.id) || !assertWritable(record.projectId)) return;
     if (typeof onPublished !== 'function') {
       setFeedback('Publishing is unavailable because the project update handler is not connected.');
       return;
@@ -5881,7 +6311,7 @@ function EvidenceWorkspace({
     }, "Replace unreadable saved data"));
   }
   function renderManual(record) {
-    const editable = record.authorKey === me.k && record.status !== 'published';
+    const editable = !activeProjectReadOnly && record.authorKey === me.k && record.status !== 'published';
     return React.createElement("div", {
       className: "ws-panel"
     }, React.createElement("div", {
@@ -5963,9 +6393,9 @@ function EvidenceWorkspace({
   }
   function renderReview(record) {
     const selected = record.entries.find(entry => entry.id === selectedEntryId) || record.entries[0] || null;
-    const canEdit = record.authorKey === me.k && record.status !== 'published';
+    const canEdit = !activeProjectReadOnly && record.authorKey === me.k && record.status !== 'published';
     const included = record.entries.filter(entry => entry.included && entry.title.trim() && entry.body.trim()).length;
-    const canActAsReviewer = reviewer && record.authorKey !== me.k && record.status === 'pending';
+    const canActAsReviewer = !activeProjectReadOnly && reviewer && record.authorKey !== me.k && record.status === 'pending';
     return React.createElement("div", {
       className: "ws-panel"
     }, React.createElement("div", {
@@ -6303,10 +6733,13 @@ function EvidenceWorkspace({
       setUploadFiles([]);
       setSection(mode === 'reviews' ? 'reviews' : 'write');
     }
-  })), renderStorageAlert(), feedback && React.createElement("div", {
+  })), renderStorageAlert(), activeProjectReadOnly && React.createElement("div", {
     className: "ws-alert",
     role: "status"
-  }, feedback), mode !== 'reviews' && !['manual', 'review'].includes(section) && React.createElement("div", {
+  }, React.createElement("strong", null, "Archived evidence"), React.createElement("span", null, "Published evidence and saved drafts remain inspectable. Resume this project before writing, uploading, reviewing, or publishing.")), feedback && React.createElement("div", {
+    className: "ws-alert",
+    role: "status"
+  }, feedback), mode !== 'reviews' && !activeProjectReadOnly && !['manual', 'review'].includes(section) && React.createElement("div", {
     className: "ws-tabs",
     role: "tablist",
     "aria-label": "Evidence workspace"
@@ -6320,7 +6753,7 @@ function EvidenceWorkspace({
   }, tab[1]))), activeRecord && !authorizedIds.has(activeRecord.projectId) ? React.createElement("div", {
     className: "ws-alert ws-alert-danger",
     role: "alert"
-  }, "This saved draft is outside your current authorized projects. It cannot be opened or changed.") : React.createElement(React.Fragment, null, section === 'write' && renderWrite(), section === 'upload' && renderUpload(), section === 'drafts' && renderDrafts(), section === 'reviews' && renderReviews(), section === 'manual' && activeRecord && renderManual(activeRecord), section === 'review' && activeRecord && renderReview(activeRecord)), React.createElement("div", {
+  }, "This saved draft is outside your current authorized projects. It cannot be opened or changed.") : React.createElement(React.Fragment, null, section === 'write' && !activeProjectReadOnly && renderWrite(), section === 'upload' && !activeProjectReadOnly && renderUpload(), section === 'drafts' && renderDrafts(), section === 'reviews' && renderReviews(), section === 'manual' && activeRecord && renderManual(activeRecord), section === 'review' && activeRecord && renderReview(activeRecord)), React.createElement("div", {
     className: "ws-actions"
   }, typeof onOpenProject === 'function' && React.createElement("button", {
     className: "ws-button ws-button-quiet",
@@ -6328,10 +6761,13 @@ function EvidenceWorkspace({
     onClick: () => onOpenProject(activeProject.id)
   }, "Open ", activeProject.code)));
 }
-const WS_NAV = [['home', 'Home'], ['projects', 'Projects'], ['evidence', 'Evidence'], ['reviews', 'Reviews'], ['handoffs', 'Handoffs'], ['discover', 'Discover']];
+const WS_NAV = [['home', 'Home'], ['projects', 'Projects'], ['evidence', 'Evidence'], ['reviews', 'Reviews'], ['handoffs', 'Handoffs'], ['map', 'Map'], ['discover', 'Discover']];
 const WS_PROJECT_TABS = [['overview', 'Overview'], ['research', 'Research'], ['record', 'Record'], ['evidence', 'Evidence'], ['people', 'People'], ['settings', 'Settings']];
 const WS_RECORD_TYPES = ['decision', 'method', 'result', 'deadend', 'blocker', 'next'];
 const WS_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function wsWorkspaceNavKey(section) {
+  return section === 'project' ? 'projects' : section;
+}
 function wsRecordSummary(projects) {
   const entries = (projects || []).flatMap(project => Array.isArray(project.log) ? project.log : []).filter(entry => entry && entry.ack !== false);
   const typeCounts = WS_RECORD_TYPES.map(type => ({
@@ -6749,16 +7185,122 @@ function WsProjectPicker({
   label
 }) {
   if (!projects.length) return null;
+  const buckets = wsProjectBuckets(projects);
   return React.createElement("label", {
-    className: "ws-field"
+    className: "ws-field ws-project-picker"
   }, React.createElement("span", null, label || 'Project'), React.createElement("select", {
     className: "ws-select",
     value: selectedId || '',
     onChange: e => onSelect(e.target.value)
-  }, projects.map(project => React.createElement("option", {
+  }, !!buckets.active.length && React.createElement("optgroup", {
+    label: "Active projects"
+  }, buckets.active.map(project => React.createElement("option", {
     key: project.id,
     value: project.id
-  }, project.name))));
+  }, project.name))), !!buckets.stashed.length && React.createElement("optgroup", {
+    label: "Stashed projects"
+  }, buckets.stashed.map(project => React.createElement("option", {
+    key: project.id,
+    value: project.id
+  }, project.name)))));
+}
+function WsWorkspaceTabs({
+  section,
+  onNavigate
+}) {
+  const activeKey = wsWorkspaceNavKey(section);
+  return React.createElement("nav", {
+    className: "ws-workspace-tabs",
+    "aria-label": "Workspace sections"
+  }, WS_NAV.map(([key, label]) => React.createElement("button", {
+    type: "button",
+    key: key,
+    className: 'ws-tab' + (activeKey === key ? ' is-active' : ''),
+    "aria-current": activeKey === key ? 'page' : undefined,
+    onClick: () => onNavigate(key)
+  }, label)));
+}
+function WsProjectContext({
+  project,
+  projectTab,
+  onTab,
+  onProjects
+}) {
+  if (!project) return null;
+  return React.createElement("div", {
+    className: "ws-project-context"
+  }, React.createElement("div", {
+    className: "ws-breadcrumb"
+  }, React.createElement("button", {
+    type: "button",
+    className: "ws-link",
+    onClick: onProjects
+  }, "Projects"), React.createElement("span", {
+    "aria-hidden": "true"
+  }, "/"), React.createElement("strong", null, project.name), wsIsStashed(project) && React.createElement(WsBadge, null, "Stashed")), React.createElement("div", {
+    className: "ws-tabs",
+    role: "tablist",
+    "aria-label": "Project sections"
+  }, WS_PROJECT_TABS.map(([key, label]) => React.createElement("button", {
+    type: "button",
+    role: "tab",
+    "aria-selected": projectTab === key,
+    className: 'ws-tab' + (projectTab === key ? ' is-active' : ''),
+    key: key,
+    onClick: () => onTab(key)
+  }, label))));
+}
+function WsHeader({
+  section,
+  project,
+  projectTab,
+  projects,
+  me,
+  identities,
+  onNavigate,
+  onProject,
+  onTab,
+  onIdentity,
+  onOpenLegacy
+}) {
+  return React.createElement("header", {
+    className: "ws-shell-header"
+  }, React.createElement("div", {
+    className: "ws-header-row"
+  }, React.createElement("button", {
+    type: "button",
+    className: "ws-brand ws-brand-horizontal",
+    onClick: () => onNavigate('home'),
+    "aria-label": "URI workspace home"
+  }, React.createElement("span", null, "URI"), React.createElement("small", null, "Research workspace")), React.createElement("div", {
+    className: "ws-header-controls"
+  }, React.createElement(WsProjectPicker, {
+    projects: projects,
+    selectedId: project ? project.id : '',
+    onSelect: onProject,
+    label: "Current project"
+  }), React.createElement("label", {
+    className: "ws-field ws-identity-picker"
+  }, React.createElement("span", null, "Viewing as"), React.createElement("select", {
+    className: "ws-select",
+    value: me.k,
+    onChange: event => onIdentity(event.target.value)
+  }, identities.map(person => React.createElement("option", {
+    value: person.k,
+    key: person.k
+  }, person.n)))), React.createElement("button", {
+    type: "button",
+    className: "ws-link ws-original-link",
+    onClick: () => onOpenLegacy('register')
+  }, "Original prototype"))), React.createElement(WsWorkspaceTabs, {
+    section: section,
+    onNavigate: onNavigate
+  }), section === 'project' && React.createElement(WsProjectContext, {
+    project: project,
+    projectTab: projectTab,
+    onTab: onTab,
+    onProjects: () => onNavigate('projects')
+  }));
 }
 function WsProjectHome({
   project,
@@ -6766,7 +7308,8 @@ function WsProjectHome({
   people,
   onAddEvidence,
   onOpenHandoff,
-  onTab
+  onTab,
+  onOpenMap
 }) {
   const approved = sortedLog(project).filter(e => e.ack !== false);
   const summary = wsRecordSummary([project]);
@@ -6781,12 +7324,24 @@ function WsProjectHome({
     eyebrow: project.code,
     title: project.name,
     subtitle: project.oneLine,
-    metadata: React.createElement(React.Fragment, null, React.createElement(WsBadge, null, project.status === 'handoff' ? 'Handoff pending' : project.status === 'archived' ? 'Archived' : 'Active'), React.createElement("span", null, "PI / advisor: ", advisor), React.createElement("span", null, "Student lead: ", studentLead), React.createElement("span", null, "Private workspace")),
-    actions: React.createElement("button", {
+    metadata: React.createElement(React.Fragment, null, React.createElement(WsBadge, null, wsIsStashed(project) ? 'Stashed' : project.status === 'handoff' ? 'Handoff pending' : 'Active'), React.createElement("span", null, "PI / advisor: ", advisor), React.createElement("span", null, "Student lead: ", studentLead), React.createElement("span", null, wsIsStashed(project) && project.stashVisibility === 'lab' ? 'Shared with lab' : 'Private workspace')),
+    actions: wsIsStashed(project) ? React.createElement(React.Fragment, null, React.createElement("button", {
+      type: "button",
+      className: "ws-button ws-button-quiet",
+      onClick: onOpenMap
+    }, "Open source map"), React.createElement("button", {
+      type: "button",
+      className: "ws-button ws-button-primary",
+      onClick: onOpenHandoff
+    }, "Export archive")) : React.createElement(React.Fragment, null, React.createElement("button", {
+      type: "button",
+      className: "ws-button ws-button-quiet",
+      onClick: onOpenMap
+    }, "View connections"), React.createElement("button", {
       type: "button",
       className: "ws-button ws-button-primary",
       onClick: onAddEvidence
-    }, "Add evidence"),
+    }, "Add evidence")),
     metrics: React.createElement(React.Fragment, null, React.createElement("div", null, React.createElement("strong", null, summary.approvedTotal), React.createElement("span", null, "Approved entries")), React.createElement("div", null, React.createElement("strong", null, approvedNext), React.createElement("span", null, "Recorded next steps")), React.createElement("div", null, React.createElement("strong", null, summary.latestDate || 'None'), React.createElement("span", null, "Latest dated update")))
   }), React.createElement(ResearchProjectSummary, {
     key: me.k + ':' + project.id,
@@ -6904,7 +7459,7 @@ function WsProjectEvidence({
     eyebrow: project.code,
     title: "Evidence",
     subtitle: "Original material and the published statements it supports.",
-    actions: React.createElement("button", {
+    actions: !wsIsStashed(project) && React.createElement("button", {
       type: "button",
       className: "ws-button ws-button-primary",
       onClick: onAddEvidence
@@ -7011,17 +7566,112 @@ function WsProjectPeople({
 }
 function WsProjectSettings({
   project,
-  onOpenLegacy
+  me,
+  onOpenLegacy,
+  onStash,
+  onResume,
+  onSetStashVisibility
 }) {
+  const [reason, setReason] = useState('');
+  const [nextStep, setNextStep] = useState('');
+  const [visibility, setVisibility] = useState('private');
+  const [feedback, setFeedback] = useState('');
+  const canManage = wsCanManageProject(project, me);
+  function stash(event) {
+    event.preventDefault();
+    if (!canManage || typeof onStash !== 'function') return;
+    const result = onStash(project, {
+      reason,
+      nextStep,
+      visibility
+    });
+    setFeedback(result && result.ok ? 'Project stashed. Its record is now read only.' : result && result.error || 'The project could not be stashed.');
+  }
+  function resume() {
+    if (!canManage || typeof onResume !== 'function') return;
+    const result = onResume(project);
+    setFeedback(result && result.ok ? 'Project resumed. Editing is available again.' : result && result.error || 'The project could not be resumed.');
+  }
+  function changeVisibility(nextVisibility) {
+    if (!canManage || typeof onSetStashVisibility !== 'function') return;
+    const result = onSetStashVisibility(project, nextVisibility);
+    setFeedback(result && result.ok ? nextVisibility === 'lab' ? 'Archive shared with the lab.' : 'Archive made private.' : result && result.error || 'Archive visibility could not be changed.');
+  }
   return React.createElement(React.Fragment, null, React.createElement(WsPageHead, {
     eyebrow: project.code,
     title: "Settings",
-    subtitle: "Prototype access and review rules for this project."
-  }), React.createElement("section", {
+    subtitle: "Manage access, lifecycle, and the durable record for this project."
+  }), feedback && React.createElement("div", {
+    className: "ws-alert",
+    role: "status"
+  }, feedback), React.createElement("section", {
     className: "ws-panel"
   }, React.createElement("div", {
     className: "ws-panel-head"
-  }, React.createElement("h2", null, "Sharing"), React.createElement(WsBadge, null, "Private")), React.createElement("p", null, "This browser prototype shows the project only to demo identities assigned to it. A production pilot still requires server-enforced access and persistent accounts.")), React.createElement("section", {
+  }, React.createElement("h2", null, "Sharing"), React.createElement(WsBadge, null, wsIsStashed(project) && project.stashVisibility === 'lab' ? 'Lab shared' : 'Private')), React.createElement("p", null, wsIsStashed(project) ? 'A lab-shared archive appears in Discover so another researcher can create a linked continuation. The source archive remains unchanged.' : 'This active project is visible only to demo identities assigned to it.'), wsIsStashed(project) && canManage && React.createElement("button", {
+    type: "button",
+    className: "ws-button ws-button-quiet",
+    onClick: () => changeVisibility(project.stashVisibility === 'lab' ? 'private' : 'lab')
+  }, project.stashVisibility === 'lab' ? 'Make archive private' : 'Share archive with lab')), !wsIsStashed(project) && React.createElement("section", {
+    className: "ws-panel ws-stash-panel"
+  }, React.createElement("div", {
+    className: "ws-panel-head"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "ws-kicker"
+  }, "Reversible lifecycle change"), React.createElement("h2", null, "Stash this project")), React.createElement(WsBadge, {
+    tone: "attention"
+  }, "Read-only archive")), React.createElement("p", null, "Stashing preserves decisions, evidence, research tracking, people, and source links. The project leaves active work but stays searchable and exportable."), canManage ? React.createElement("form", {
+    className: "ws-stack",
+    onSubmit: stash,
+    noValidate: true
+  }, React.createElement("label", {
+    className: "ws-field"
+  }, React.createElement("span", null, "Why did work stop?"), React.createElement("textarea", {
+    className: "ws-textarea",
+    rows: "3",
+    value: reason,
+    onChange: event => setReason(event.target.value),
+    required: true
+  })), React.createElement("label", {
+    className: "ws-field"
+  }, React.createElement("span", null, "Recommended next step"), React.createElement("textarea", {
+    className: "ws-textarea",
+    rows: "3",
+    value: nextStep,
+    onChange: event => setNextStep(event.target.value),
+    required: true
+  })), React.createElement("label", {
+    className: "ws-field"
+  }, React.createElement("span", null, "Archive visibility"), React.createElement("select", {
+    className: "ws-select",
+    value: visibility,
+    onChange: event => setVisibility(event.target.value)
+  }, React.createElement("option", {
+    value: "private"
+  }, "Private to assigned team"), React.createElement("option", {
+    value: "lab"
+  }, "Share with lab in Discover"))), React.createElement("div", {
+    className: "ws-actions"
+  }, React.createElement("button", {
+    type: "submit",
+    className: "ws-button ws-button-primary"
+  }, "Stash project"))) : React.createElement("div", {
+    className: "ws-empty"
+  }, "Only the project PI or assigned PhD mentor can stash this project.")), wsIsStashed(project) && React.createElement("section", {
+    className: "ws-panel ws-stash-panel"
+  }, React.createElement("div", {
+    className: "ws-panel-head"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "ws-kicker"
+  }, project.stashedOn || project.archivedOn ? 'Stashed ' + new Date(project.stashedOn || project.archivedOn).toLocaleDateString() : 'Stashed project'), React.createElement("h2", null, "Archived project record")), React.createElement(WsBadge, null, "Read only")), React.createElement("dl", {
+    className: "ws-stash-summary"
+  }, React.createElement("div", null, React.createElement("dt", null, "Why work stopped"), React.createElement("dd", null, project.stashReason || 'No reason recorded.')), React.createElement("div", null, React.createElement("dt", null, "Recommended next step"), React.createElement("dd", null, project.stashNextStep || 'No next step recorded.'))), canManage && React.createElement("div", {
+    className: "ws-actions"
+  }, React.createElement("button", {
+    type: "button",
+    className: "ws-button ws-button-primary",
+    onClick: resume
+  }, "Resume this project"))), React.createElement("section", {
     className: "ws-panel"
   }, React.createElement("div", {
     className: "ws-panel-head"
@@ -7170,8 +7820,11 @@ function WsProjects({
   setQuery,
   onOpenProject
 }) {
+  const [view, setView] = useState('active');
+  const buckets = wsProjectBuckets(projects);
   const q = query.trim().toLowerCase();
-  const shown = projects.filter(project => {
+  const collection = view === 'stashed' ? buckets.stashed : buckets.active;
+  const shown = collection.filter(project => {
     const projectText = [project.name, project.code, project.field, project.pi, project.oneLine].join(' ');
     const recordText = (project.log || []).map(entry => [entry.h, entry.b, entry.au].join(' ')).join(' ');
     return (projectText + ' ' + recordText).toLowerCase().includes(q);
@@ -7179,7 +7832,27 @@ function WsProjects({
   return React.createElement(React.Fragment, null, React.createElement(WsPageHead, {
     title: "Projects",
     subtitle: "Only projects available to the selected demo identity appear here."
-  }), React.createElement("label", {
+  }), React.createElement("div", {
+    className: "ws-tabs",
+    role: "tablist",
+    "aria-label": "Project lifecycle"
+  }, React.createElement("button", {
+    type: "button",
+    role: "tab",
+    "aria-selected": view === 'active',
+    className: 'ws-tab' + (view === 'active' ? ' is-active' : ''),
+    onClick: () => setView('active')
+  }, "Active ", React.createElement("span", {
+    className: "ws-count"
+  }, buckets.active.length)), React.createElement("button", {
+    type: "button",
+    role: "tab",
+    "aria-selected": view === 'stashed',
+    className: 'ws-tab' + (view === 'stashed' ? ' is-active' : ''),
+    onClick: () => setView('stashed')
+  }, "Stashed ", React.createElement("span", {
+    className: "ws-count"
+  }, buckets.stashed.length))), React.createElement("label", {
     className: "ws-field ws-search"
   }, React.createElement("span", null, "Search accessible projects and records"), React.createElement("input", {
     className: "ws-input",
@@ -7199,17 +7872,205 @@ function WsProjects({
     className: "ws-meta"
   }, project.log.length, " entries"))), !shown.length && React.createElement("div", {
     className: "ws-empty"
-  }, "No accessible project or published record matches this search.")));
+  }, q ? 'No project or published record matches this search.' : 'No ' + view + ' projects are available.')));
+}
+const WS_GRAPH_TYPES = [['project', 'Project'], ['record', 'Record'], ['decision', 'Decision'], ['research', 'Research'], ['artifact', 'Artifact'], ['source', 'Source']];
+function WsResearchMap({
+  projects,
+  scope,
+  onScopeChange,
+  me,
+  onOpenTarget
+}) {
+  const [query, setQuery] = useState('');
+  const [types, setTypes] = useState([]);
+  const [includePending, setIncludePending] = useState(false);
+  const [selectedId, setSelectedId] = useState('');
+  const [listView, setListView] = useState(false);
+  const researchItems = useMemo(() => {
+    const storage = wsResearchBrowserStorage(window);
+    if (!storage.ok) return [];
+    const read = wsResearchRead(storage.storage);
+    return (projects || []).flatMap(project => wsResearchCurrent(read.state, project.id));
+  }, [projects]);
+  const graph = useMemo(() => wsBuildResearchGraph(projects, researchItems, {
+    includePending
+  }), [projects, researchItems, includePending]);
+  const filtered = useMemo(() => wsFilterResearchGraph(graph, {
+    scope,
+    query,
+    types
+  }), [graph, scope, query, types]);
+  const positions = useMemo(() => wsLayoutResearchGraph(filtered, 980, 580), [filtered]);
+  const byId = useMemo(() => new Map(positions.map(node => [node.id, node])), [positions]);
+  const selected = byId.get(selectedId) || null;
+  const connected = useMemo(() => {
+    if (!selected) return new Set();
+    const ids = new Set([selected.id]);
+    filtered.edges.forEach(edge => {
+      if (edge.source === selected.id) ids.add(edge.target);
+      if (edge.target === selected.id) ids.add(edge.source);
+    });
+    return ids;
+  }, [selected, filtered]);
+  const canSeePending = ['pi', 'phd'].includes(me.tier);
+  function toggleType(type) {
+    setTypes(current => current.includes(type) ? current.filter(item => item !== type) : [...current, type]);
+  }
+  function activate(node) {
+    setSelectedId(node.id);
+  }
+  return React.createElement(React.Fragment, null, React.createElement(WsPageHead, {
+    eyebrow: "Lab knowledge graph",
+    title: "Research map",
+    subtitle: "Trace how projects, evidence, decisions, research work, files, and named sources connect across the lab."
+  }), React.createElement("section", {
+    className: "ws-map-toolbar",
+    "aria-label": "Map filters"
+  }, React.createElement("label", {
+    className: "ws-field"
+  }, React.createElement("span", null, "Scope"), React.createElement("select", {
+    className: "ws-select",
+    value: scope,
+    onChange: event => onScopeChange(event.target.value)
+  }, React.createElement("option", {
+    value: "all"
+  }, "All lab projects"), projects.map(project => React.createElement("option", {
+    key: project.id,
+    value: project.id
+  }, project.name, wsIsStashed(project) ? ' (stashed)' : '')))), React.createElement("label", {
+    className: "ws-field ws-search"
+  }, React.createElement("span", null, "Find a node"), React.createElement("input", {
+    className: "ws-input",
+    value: query,
+    onChange: event => setQuery(event.target.value),
+    placeholder: "Search sources, decisions, files..."
+  })), React.createElement("button", {
+    type: "button",
+    className: "ws-button ws-button-quiet",
+    "aria-pressed": listView,
+    onClick: () => setListView(value => !value)
+  }, listView ? 'Show map' : 'Show list'), canSeePending && React.createElement("label", {
+    className: "ws-check"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: includePending,
+    onChange: event => setIncludePending(event.target.checked)
+  }), React.createElement("span", null, "Include pending review"))), React.createElement("div", {
+    className: "ws-map-type-filters",
+    "aria-label": "Node types"
+  }, WS_GRAPH_TYPES.map(([type, label]) => React.createElement("button", {
+    type: "button",
+    key: type,
+    className: 'ws-map-type ws-map-type-' + type + (types.includes(type) ? ' is-active' : ''),
+    "aria-pressed": types.includes(type),
+    onClick: () => toggleType(type)
+  }, React.createElement("span", {
+    "aria-hidden": "true"
+  }), label))), React.createElement("div", {
+    className: "ws-map-summary",
+    role: "status"
+  }, React.createElement("strong", null, filtered.counts.nodes), " nodes, ", React.createElement("strong", null, filtered.counts.edges), " connections across ", React.createElement("strong", null, filtered.counts.projects), " projects"), listView ? React.createElement("section", {
+    className: "ws-panel ws-map-list",
+    "aria-label": "Research map as a list"
+  }, React.createElement("div", {
+    className: "ws-list"
+  }, positions.map(node => React.createElement("button", {
+    type: "button",
+    className: "ws-row",
+    key: node.id,
+    onClick: () => activate(node)
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "ws-inline ws-meta"
+  }, React.createElement(WsBadge, null, node.type), node.status && React.createElement("span", null, node.status)), React.createElement("strong", null, node.label), React.createElement("p", null, node.detail || 'No additional detail recorded.')))), !positions.length && React.createElement("div", {
+    className: "ws-empty"
+  }, "No nodes match these filters."))) : React.createElement("section", {
+    className: "ws-map-stage",
+    "aria-label": "Interactive research relationship map"
+  }, React.createElement("svg", {
+    className: "ws-map-canvas",
+    viewBox: "0 0 980 580",
+    role: "img",
+    "aria-label": 'Research map with ' + filtered.counts.nodes + ' nodes and ' + filtered.counts.edges + ' connections'
+  }, React.createElement("g", {
+    className: "ws-map-edges"
+  }, filtered.edges.map(edge => {
+    const source = byId.get(edge.source);
+    const target = byId.get(edge.target);
+    if (!source || !target) return null;
+    const highlighted = selected && (edge.source === selected.id || edge.target === selected.id);
+    return React.createElement("line", {
+      key: edge.id,
+      x1: source.x,
+      y1: source.y,
+      x2: target.x,
+      y2: target.y,
+      className: highlighted ? 'is-highlighted' : ''
+    }, React.createElement("title", null, edge.label));
+  })), React.createElement("g", {
+    className: "ws-map-nodes"
+  }, positions.map(node => {
+    const active = node.id === selectedId;
+    const muted = selected && !connected.has(node.id);
+    const radius = node.type === 'project' ? 15 : node.type === 'source' ? 8 : 10;
+    return React.createElement("g", {
+      key: node.id,
+      className: 'ws-map-node ws-map-node-' + node.type + (active ? ' is-selected' : '') + (muted ? ' is-muted' : ''),
+      role: "button",
+      tabIndex: "0",
+      "aria-label": node.type + ': ' + node.label,
+      onClick: () => activate(node),
+      onKeyDown: event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          activate(node);
+        }
+      }
+    }, React.createElement("circle", {
+      cx: node.x,
+      cy: node.y,
+      r: radius
+    }), React.createElement("text", {
+      x: node.x + radius + 5,
+      y: node.y + 4
+    }, node.label.length > 28 ? node.label.slice(0, 26) + '...' : node.label));
+  }))), !positions.length && React.createElement("div", {
+    className: "ws-map-empty"
+  }, "No nodes match these filters.")), selected && React.createElement("aside", {
+    className: "ws-map-detail",
+    "aria-live": "polite"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "ws-inline ws-meta"
+  }, React.createElement(WsBadge, null, selected.type), selected.status && React.createElement("span", null, selected.status)), React.createElement("h2", null, selected.label), React.createElement("p", null, selected.detail || 'No additional detail recorded.')), selected.target && React.createElement("button", {
+    type: "button",
+    className: "ws-button ws-button-primary",
+    onClick: () => onOpenTarget(selected.target)
+  }, "Open record")), !!graph.warnings.length && React.createElement("details", {
+    className: "ws-map-warnings"
+  }, React.createElement("summary", null, graph.warnings.length, " unresolved connection", graph.warnings.length === 1 ? '' : 's', " skipped"), React.createElement("ul", null, graph.warnings.map((warning, index) => React.createElement("li", {
+    key: index
+  }, warning)))));
 }
 function WsDiscover({
   shelf,
+  projects,
   me,
   accessibleIds,
-  onOpenLegacy
+  onOpenLegacy,
+  onContinue
 }) {
   const [query, setQuery] = useState('');
+  const [feedback, setFeedback] = useState('');
   const available = (shelf || []).filter(item => me.scope === 'all' || accessibleIds.has(item.parent) || item.shelvedBy === me.k).filter(item => !item.claimedBy);
-  const shown = available.filter(item => [item.name, item.oneLine, item.field, item.reasonText].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
+  const sharedProjects = (projects || []).filter(project => wsIsStashed(project) && project.stashVisibility === 'lab');
+  const q = query.trim().toLowerCase();
+  const shown = available.filter(item => [item.name, item.oneLine, item.field, item.reasonText].join(' ').toLowerCase().includes(q));
+  const shownArchives = sharedProjects.filter(project => [project.name, project.oneLine, project.field, project.stashReason, project.stashNextStep].join(' ').toLowerCase().includes(q));
+  function continueArchive(project) {
+    if (typeof onContinue !== 'function') return;
+    const result = onContinue(project);
+    setFeedback(result && result.ok ? 'Created a linked active continuation from ' + project.code + '.' : result && result.error || 'The continuation could not be created.');
+  }
   return React.createElement(React.Fragment, null, React.createElement(WsPageHead, {
     eyebrow: "The Shelf",
     title: "Discover paused work",
@@ -7226,7 +8087,33 @@ function WsDiscover({
     value: query,
     onChange: e => setQuery(e.target.value),
     placeholder: "Search shelved projects"
-  })), React.createElement("div", {
+  })), feedback && React.createElement("div", {
+    className: "ws-alert",
+    role: "status"
+  }, feedback), !!shownArchives.length && React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "ws-section-heading"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "ws-kicker"
+  }, "Shared archives"), React.createElement("h2", null, "Continue a stashed lab project"))), React.createElement("div", {
+    className: "ws-grid ws-grid-two"
+  }, shownArchives.map(project => React.createElement("article", {
+    className: "ws-panel",
+    key: project.id
+  }, React.createElement("div", {
+    className: "ws-panel-head"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "ws-kicker"
+  }, project.code), React.createElement("h2", null, project.name)), React.createElement(WsBadge, null, "Stashed")), React.createElement("p", null, project.oneLine), React.createElement("dl", {
+    className: "ws-stash-summary"
+  }, React.createElement("div", null, React.createElement("dt", null, "Why it stopped"), React.createElement("dd", null, project.stashReason)), React.createElement("div", null, React.createElement("dt", null, "Next step"), React.createElement("dd", null, project.stashNextStep))), React.createElement("button", {
+    type: "button",
+    className: "ws-button ws-button-primary",
+    onClick: () => continueArchive(project)
+  }, "Continue as new project"))))), React.createElement("div", {
+    className: "ws-section-heading"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "ws-kicker"
+  }, "Legacy shelf"), React.createElement("h2", null, "Prepared revival briefs"))), React.createElement("div", {
     className: "ws-grid ws-grid-two"
   }, shown.map(item => React.createElement("article", {
     className: "ws-panel",
@@ -7241,9 +8128,9 @@ function WsDiscover({
     type: "button",
     className: "ws-button ws-button-quiet",
     onClick: () => onOpenLegacy('shelfitem', item.id)
-  }, "Read revival brief")))), !shown.length && React.createElement("div", {
+  }, "Read revival brief")))), !shown.length && !shownArchives.length && React.createElement("div", {
     className: "ws-empty"
-  }, "No accessible shelved project matches this search."));
+  }, "No accessible shelved project or shared archive matches this search."));
 }
 function ResearchWorkspace({
   projects,
@@ -7251,26 +8138,33 @@ function ResearchWorkspace({
   onIdentityChange,
   onPublishEntries,
   shelf,
-  onOpenLegacy
+  onOpenLegacy,
+  onStash,
+  onResume,
+  onSetStashVisibility,
+  onContinue
 }) {
   const initial = wsReadState(me.k);
   const accessibleProjects = useMemo(() => (projects || []).filter(project => me.scope === 'all' || (me.projects || []).includes(project.id)), [projects, me]);
+  const projectBuckets = useMemo(() => wsProjectBuckets(accessibleProjects), [accessibleProjects]);
   const accessibleIds = useMemo(() => new Set(accessibleProjects.map(project => project.id)), [accessibleProjects]);
-  const firstId = accessibleProjects[0] ? accessibleProjects[0].id : '';
+  const firstId = projectBuckets.active[0] ? projectBuckets.active[0].id : accessibleProjects[0] ? accessibleProjects[0].id : '';
   const [section, setSection] = useState(initial.section || 'home');
   const [selectedProjectId, setSelectedProjectId] = useState(initial.selectedProjectId || firstId);
   const [projectTab, setProjectTab] = useState(initial.projectTab || 'overview');
   const [query, setQuery] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [mapScope, setMapScope] = useState('all');
   const identityRef = useRef(me.k);
-  const selectedProject = accessibleProjects.find(project => project.id === selectedProjectId) || accessibleProjects[0] || null;
+  const selectedProject = accessibleProjects.find(project => project.id === selectedProjectId) || accessibleProjects.find(project => project.id === firstId) || null;
   const identities = PEOPLE.filter(person => person.tier !== 'partner');
   useEffect(() => {
     if (identityRef.current === me.k) return;
     identityRef.current = me.k;
     const saved = wsReadState(me.k);
     setSection(saved.section || 'home');
-    setSelectedProjectId(saved.selectedProjectId || ((projects || []).find(project => me.scope === 'all' || (me.projects || []).includes(project.id)) || {}).id || '');
+    const nextProjects = (projects || []).filter(project => me.scope === 'all' || (me.projects || []).includes(project.id));
+    const nextBuckets = wsProjectBuckets(nextProjects);
+    setSelectedProjectId(saved.selectedProjectId || (nextBuckets.active[0] || nextProjects[0] || {}).id || '');
     setProjectTab(saved.projectTab || 'overview');
     setQuery('');
   }, [me.k, me.scope, me.projects, projects]);
@@ -7287,14 +8181,13 @@ function ResearchWorkspace({
       }));
     } catch (_) {}
   }, [section, selectedProjectId, projectTab, me.k]);
+  React.useLayoutEffect(() => {
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [section, selectedProjectId, projectTab]);
   function navigate(nextSection) {
     setSection(nextSection);
-    setMenuOpen(false);
-    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    window.scrollTo({
-      top: 0,
-      behavior: reduceMotion ? 'auto' : 'smooth'
-    });
+    window.scrollTo(0, 0);
   }
   function openProject(id, tab) {
     if (!accessibleIds.has(id)) return;
@@ -7302,9 +8195,24 @@ function ResearchWorkspace({
     setProjectTab(tab || 'overview');
     navigate('project');
   }
+  function selectProject(id) {
+    if (!accessibleIds.has(id)) return;
+    setSelectedProjectId(id);
+    if (section !== 'project') navigate('project');
+  }
   function openEvidence(id) {
     if (id && accessibleIds.has(id)) setSelectedProjectId(id);
     navigate('evidence');
+  }
+  function openMap(id) {
+    if (id && accessibleIds.has(id)) setSelectedProjectId(id);
+    setMapScope(id && accessibleIds.has(id) ? id : 'all');
+    setSection('map');
+    window.scrollTo(0, 0);
+  }
+  function openMapTarget(target) {
+    if (!target || !accessibleIds.has(target.projectId)) return;
+    openProject(target.projectId, target.projectTab || 'overview');
   }
   function handlePublished(projectId, entries) {
     if (onPublishEntries) onPublishEntries(projectId, entries);
@@ -7312,96 +8220,46 @@ function ResearchWorkspace({
     setProjectTab('record');
     navigate('project');
   }
+  function handleContinue(project) {
+    if (typeof onContinue !== 'function') return {
+      ok: false,
+      error: 'Project continuation is unavailable.'
+    };
+    const result = onContinue(project);
+    if (result && result.ok && result.project) {
+      setSelectedProjectId(result.project.id);
+      setProjectTab('overview');
+      setSection('project');
+      window.scrollTo(0, 0);
+    }
+    return result;
+  }
   const safeOpenLegacy = onOpenLegacy || (() => {});
   return React.createElement("div", {
-    className: 'ws-app' + (menuOpen ? ' menu-open' : '')
+    className: "ws-app"
   }, React.createElement("a", {
     className: "skip",
     href: "#workspace-main"
-  }, "Skip to workspace content"), React.createElement("button", {
-    type: "button",
-    className: "ws-mobile-menu",
-    "aria-expanded": menuOpen,
-    "aria-controls": "workspace-navigation",
-    onClick: () => setMenuOpen(open => !open)
-  }, "Menu"), menuOpen && React.createElement("button", {
-    type: "button",
-    className: "ws-drawer-backdrop",
-    "aria-label": "Close menu",
-    onClick: () => setMenuOpen(false)
-  }), React.createElement("aside", {
-    id: "workspace-navigation",
-    className: 'ws-sidebar' + (menuOpen ? ' is-open' : '')
-  }, React.createElement("div", {
-    className: "ws-sidebar-head"
-  }, React.createElement("button", {
-    type: "button",
-    className: "ws-brand",
-    onClick: () => navigate('home'),
-    "aria-label": "URI workspace home"
-  }, React.createElement("span", null, "URI"), React.createElement("small", null, "Research workspace"))), React.createElement("nav", {
-    className: "ws-nav",
-    "aria-label": "Workspace"
-  }, React.createElement("div", {
-    className: "ws-nav-label"
-  }, "Workspace"), WS_NAV.map(([key, label]) => React.createElement("button", {
-    type: "button",
-    key: key,
-    className: 'ws-nav-item' + (section === key ? ' is-active' : ''),
-    "aria-current": section === key ? 'page' : undefined,
-    onClick: () => navigate(key)
-  }, React.createElement(WsIcon, {
-    name: key
-  }), React.createElement("span", null, label))), accessibleProjects.length > 0 && React.createElement(React.Fragment, null, React.createElement("div", {
-    className: "ws-nav-label"
-  }, "Projects"), accessibleProjects.map(project => React.createElement("button", {
-    type: "button",
-    className: 'ws-nav-item' + (section === 'project' && selectedProject && selectedProject.id === project.id ? ' is-active' : ''),
-    key: project.id,
-    onClick: () => openProject(project.id)
-  }, React.createElement("span", null, project.name), React.createElement("small", null, project.code))))), React.createElement("div", {
-    className: "ws-sidebar-foot"
-  }, React.createElement("label", {
-    className: "ws-field ws-demo"
-  }, React.createElement("span", null, "Demo identity"), React.createElement("select", {
-    className: "ws-select",
-    value: me.k,
-    onChange: e => {
-      const person = byKey(e.target.value);
-      if (person && onIdentityChange) onIdentityChange(person);
-    }
-  }, identities.map(person => React.createElement("option", {
-    value: person.k,
-    key: person.k
-  }, person.n)))), React.createElement("div", {
-    className: "ws-inline"
-  }, React.createElement("span", {
-    className: "ws-avatar",
-    "aria-hidden": "true"
-  }, me.i), React.createElement("div", null, React.createElement("strong", null, me.n), React.createElement("div", {
-    className: "ws-meta"
-  }, me.line))), React.createElement("button", {
-    type: "button",
-    className: "ws-link",
-    onClick: () => safeOpenLegacy('register')
-  }, "Original prototype"))), React.createElement("div", {
-    className: "ws-main"
-  }, React.createElement("header", {
-    className: "ws-topbar"
-  }, React.createElement("div", null, React.createElement("div", {
-    className: "ws-topbar-title"
-  }, section === 'project' && selectedProject ? selectedProject.name : (WS_NAV.find(item => item[0] === section) || ['', 'Project'])[1]), React.createElement("div", {
-    className: "ws-topbar-meta"
-  }, "Demo workspace - browser-stored data")), accessibleProjects.length > 0 && !['evidence', 'reviews'].includes(section) && React.createElement(WsProjectPicker, {
+  }, "Skip to workspace content"), React.createElement(WsHeader, {
+    section: section,
+    project: selectedProject,
+    projectTab: projectTab,
     projects: accessibleProjects,
-    selectedId: selectedProject ? selectedProject.id : firstId,
-    onSelect: id => openProject(id),
-    label: "Current project"
-  })), React.createElement("main", {
+    me: me,
+    identities: identities,
+    onNavigate: key => key === 'map' ? openMap() : navigate(key),
+    onProject: selectProject,
+    onTab: setProjectTab,
+    onIdentity: key => {
+      const person = byKey(key);
+      if (person && onIdentityChange) onIdentityChange(person);
+    },
+    onOpenLegacy: safeOpenLegacy
+  }), React.createElement("main", {
     id: "workspace-main",
     className: "ws-content"
   }, section === 'home' && React.createElement(WsHome, {
-    projects: accessibleProjects,
+    projects: projectBuckets.active,
     me: me,
     onOpenProject: openProject,
     onAddEvidence: openEvidence
@@ -7429,29 +8287,40 @@ function ResearchWorkspace({
     project: selectedProject
   })) : React.createElement("div", {
     className: "ws-empty"
-  }, "This demo identity has no accessible project to hand off.")), section === 'discover' && React.createElement(WsDiscover, {
+  }, "This demo identity has no accessible project to hand off.")), section === 'map' && React.createElement(WsResearchMap, {
+    projects: accessibleProjects,
+    scope: mapScope,
+    onScopeChange: setMapScope,
+    me: me,
+    onOpenTarget: openMapTarget
+  }), section === 'discover' && React.createElement(WsDiscover, {
     shelf: shelf || [],
+    projects: projects || [],
     me: me,
     accessibleIds: accessibleIds,
-    onOpenLegacy: safeOpenLegacy
-  }), section === 'project' && selectedProject && React.createElement(React.Fragment, null, React.createElement("div", {
-    className: "ws-tabs",
-    role: "tablist",
-    "aria-label": "Project sections"
-  }, WS_PROJECT_TABS.map(([key, label]) => React.createElement("button", {
+    onOpenLegacy: safeOpenLegacy,
+    onContinue: handleContinue
+  }), section === 'project' && selectedProject && React.createElement(React.Fragment, null, wsIsStashed(selectedProject) && React.createElement("div", {
+    className: "ws-stashed-banner",
+    role: "status"
+  }, React.createElement("div", null, React.createElement("strong", null, "This project is stashed and read only."), React.createElement("span", null, selectedProject.stashReason || 'Its full record remains available for reference and export.')), React.createElement("div", {
+    className: "ws-actions"
+  }, React.createElement("button", {
     type: "button",
-    role: "tab",
-    "aria-selected": projectTab === key,
-    className: 'ws-tab' + (projectTab === key ? ' is-active' : ''),
-    key: key,
-    onClick: () => setProjectTab(key)
-  }, label))), projectTab === 'overview' && React.createElement(WsProjectHome, {
+    className: "ws-button ws-button-quiet",
+    onClick: () => openMap(selectedProject.id)
+  }, "View connections"), React.createElement("button", {
+    type: "button",
+    className: "ws-button ws-button-quiet",
+    onClick: () => navigate('handoffs')
+  }, "Export archive"))), projectTab === 'overview' && React.createElement(WsProjectHome, {
     project: selectedProject,
     me: me,
     people: PEOPLE,
     onAddEvidence: () => openEvidence(selectedProject.id),
     onOpenHandoff: () => navigate('handoffs'),
-    onTab: setProjectTab
+    onTab: setProjectTab,
+    onOpenMap: () => openMap(selectedProject.id)
   }), projectTab === 'research' && React.createElement(ResearchProjectWorkspace, {
     key: me.k + ':' + selectedProject.id,
     project: selectedProject,
@@ -7466,10 +8335,14 @@ function ResearchWorkspace({
     project: selectedProject
   }), projectTab === 'settings' && React.createElement(WsProjectSettings, {
     project: selectedProject,
-    onOpenLegacy: safeOpenLegacy
+    me: me,
+    onOpenLegacy: safeOpenLegacy,
+    onStash: onStash,
+    onResume: onResume,
+    onSetStashVisibility: onSetStashVisibility
   })), section === 'project' && !selectedProject && React.createElement("div", {
     className: "ws-empty"
-  }, "Choose a demo identity with access to a project."))));
+  }, "Choose a demo identity with access to a project.")));
 }
 const {
   useState,

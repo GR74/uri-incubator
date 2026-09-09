@@ -54,6 +54,15 @@ test('malformed navigation preferences recover to a supported screen', () => {
   assert.deepEqual(Object.keys(context.wsReadState('test')), []);
 });
 
+test('project pages keep Projects active and Map is restorable', () => {
+  memory.set('uri.workspace.test', JSON.stringify({ section:'map', projectTab:'record', selectedProjectId:'p1' }));
+  const state = context.wsReadState('test');
+  assert.equal(state.section, 'map');
+  assert.equal(state.projectTab, 'record');
+  assert.equal(state.selectedProjectId, 'p1');
+  assert.equal(context.wsWorkspaceNavKey('project'), 'projects');
+});
+
 test('export retains historical rationale, citations, and supersession links', () => {
   const exported = context.wsMarkdown({ name: 'Sample project', oneLine: 'Project objective', log: [
     { id: 'old', t: 'decision', d: '2026-08-01', au: 'A', h: 'Original approach', b: 'Original detail', why: 'Original rationale', ack: true },
