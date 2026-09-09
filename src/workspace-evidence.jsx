@@ -328,6 +328,7 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
   const authorizedKey = (projects || []).map(project => project.id).join('|');
   const reviewer = wsCanReview(me);
   const activeProject = (projects || []).find(project => project.id === projectId) || null;
+  const activeProjectReadOnly = !!activeProject && (activeProject.status === 'stashed' || activeProject.status === 'archived');
   const activeRecord = evidenceState.records.find(record => record.id === activeRecordId) || null;
   const visibleRecords = evidenceState.records.filter(record => canReadRecord(record));
   const projectRecords = visibleRecords.filter(record => record.projectId === projectId);
@@ -344,6 +345,10 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
   React.useEffect(() => {
     if (!authorizedIds.has(projectId)) setProjectId(firstProjectId);
   }, [authorizedKey, projectId, firstProjectId]);
+
+  React.useEffect(() => {
+    if (activeProjectReadOnly && !['drafts', 'reviews', 'review'].includes(section)) setSection(mode === 'reviews' ? 'reviews' : 'drafts');
+  }, [activeProjectReadOnly, mode, section]);
 
   React.useEffect(() => {
     if (storageBlocked) return;
@@ -364,6 +369,15 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
       return false;
     }
     return true;
+  }
+
+  function assertWritable(targetProjectId) {
+    const target = (projects || []).find(project => project.id === targetProjectId);
+    if (target && (target.status === 'stashed' || target.status === 'archived')) {
+      setFeedback('This project is stashed. Its evidence remains readable, but changes require resuming the project.');
+      return false;
+    }
+    return assertAuthorized(targetProjectId);
   }
 
   function canReadRecord(record) {
@@ -388,7 +402,7 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
   function updateAuthoredRecord(recordId, updater) {
     setEvidenceState(current => {
       const record = current.records.find(item => item.id === recordId);
-      if (!record || !authorizedIds.has(record.projectId) || record.authorKey !== me.k || record.status === 'published') {
+      if (!record || !assertWritable(record.projectId) || record.authorKey !== me.k || record.status === 'published') {
         setFeedback('You cannot edit this draft. No change was made.');
         return current;
       }
@@ -404,7 +418,7 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
   }
 
   function startManualRecord() {
-    if (!activeProject || !assertAuthorized(activeProject.id)) return;
+    if (!activeProject || !assertWritable(activeProject.id)) return;
     const record = wsCreateRecord(activeProject.id, me, 'manual', '');
     setEvidenceState(current => ({ ...current, records: [record, ...current.records] }));
     setActiveRecordId(record.id);
@@ -438,6 +452,7 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
   }
 
   function addFiles(fileList) {
+    if (!activeProject || !assertWritable(activeProject.id)) return;
     const existingFiles = visibleRecords.flatMap(record => record.files.map(file => ({ record, file })));
     const additions = Array.from(fileList || []).map(file => {
       const name = file.name || 'unnamed file';
@@ -472,7 +487,7 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
   }
 
   async function analyzeFiles(onlyIds) {
-    if (!activeProject || !assertAuthorized(projectId)) return;
+    if (!activeProject || !assertWritable(projectId)) return;
     const existingGroup = analysisRecordId ? evidenceRef.current.records.find(record => record.id === analysisRecordId) : null;
     if (existingGroup && (existingGroup.authorKey !== me.k || !authorizedIds.has(existingGroup.projectId) || existingGroup.status === 'published')) {
       setFeedback('This analyzed change set can no longer be edited. Start a new upload group.');
@@ -565,7 +580,7 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
   }
 
   function requestReview(record) {
-    if (!assertAuthorized(record.projectId) || record.authorKey !== me.k || record.status !== 'draft') return;
+    if (!assertWritable(record.projectId) || record.authorKey !== me.k || record.status !== 'draft') return;
     const entries = wsEntriesForPublish(record, new Date().toISOString().slice(0, 10));
     if (!entries.length) {
       setFeedback('Include at least one complete entry before requesting review.');
@@ -584,7 +599,7 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
   }
 
   function requestChanges(record) {
-    if (!reviewer || record.authorKey === me.k || !assertAuthorized(record.projectId) || record.status !== 'pending') return;
+    if (!reviewer || record.authorKey === me.k || !assertWritable(record.projectId) || record.status !== 'pending') return;
     if (!reviewComment.trim()) {
       setFeedback('Add a specific review comment before requesting changes.');
       return;
@@ -612,7 +627,7 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
   }
 
   function publishRecord(record, approval) {
-    if (!record || publishing.current.has(record.id) || !assertAuthorized(record.projectId)) return;
+    if (!record || publishing.current.has(record.id) || !assertWritable(record.projectId)) return;
     if (typeof onPublished !== 'function') {
       setFeedback('Publishing is unavailable because the project update handler is not connected.');
       return;
@@ -702,7 +717,7 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
   }
 
   function renderManual(record) {
-    const editable = record.authorKey === me.k && record.status !== 'published';
+    const editable = !activeProjectReadOnly && record.authorKey === me.k && record.status !== 'published';
     return (
       <div className="ws-panel">
         <div className="ws-page-head">
@@ -773,9 +788,9 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
 
   function renderReview(record) {
     const selected = record.entries.find(entry => entry.id === selectedEntryId) || record.entries[0] || null;
-    const canEdit = record.authorKey === me.k && record.status !== 'published';
+    const canEdit = !activeProjectReadOnly && record.authorKey === me.k && record.status !== 'published';
     const included = record.entries.filter(entry => entry.included && entry.title.trim() && entry.body.trim()).length;
-    const canActAsReviewer = reviewer && record.authorKey !== me.k && record.status === 'pending';
+    const canActAsReviewer = !activeProjectReadOnly && reviewer && record.authorKey !== me.k && record.status === 'pending';
     return (
       <div className="ws-panel">
         <div className="ws-page-head">
@@ -1033,8 +1048,9 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
         <WSEvidenceProjectPicker projects={projects} projectId={projectId} onChange={value => { setProjectId(value); setActiveRecordId(null); setAnalysisRecordId(null); setUploadFiles([]); setSection(mode === 'reviews' ? 'reviews' : 'write'); }} />
       </div>
       {renderStorageAlert()}
+      {activeProjectReadOnly && <div className="ws-alert" role="status"><strong>Archived evidence</strong><span>Published evidence and saved drafts remain inspectable. Resume this project before writing, uploading, reviewing, or publishing.</span></div>}
       {feedback && <div className="ws-alert" role="status">{feedback}</div>}
-      {mode !== 'reviews' && !['manual', 'review'].includes(section) && (
+      {mode !== 'reviews' && !activeProjectReadOnly && !['manual', 'review'].includes(section) && (
         <div className="ws-tabs" role="tablist" aria-label="Evidence workspace">
           {[['write', 'Write an update'], ['upload', 'Upload material'], ['drafts', 'Drafts']].map(tab => (
             <button key={tab[0]} type="button" role="tab" aria-selected={section === tab[0]}
@@ -1046,8 +1062,8 @@ function EvidenceWorkspace({ projects, me, initialProjectId, mode, onPublished, 
         <div className="ws-alert ws-alert-danger" role="alert">This saved draft is outside your current authorized projects. It cannot be opened or changed.</div>
       ) : (
         <>
-          {section === 'write' && renderWrite()}
-          {section === 'upload' && renderUpload()}
+          {section === 'write' && !activeProjectReadOnly && renderWrite()}
+          {section === 'upload' && !activeProjectReadOnly && renderUpload()}
           {section === 'drafts' && renderDrafts()}
           {section === 'reviews' && renderReviews()}
           {section === 'manual' && activeRecord && renderManual(activeRecord)}

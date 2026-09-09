@@ -273,6 +273,7 @@ function WsResearchPlot({ series }) {
 
 function ResearchProjectSummary({ project, me, onOpen }) {
   if (!wsResearchHasProjectAccess(me, project)) return null;
+  const readOnly = project.status === 'stashed' || project.status === 'archived';
   const storageResult = wsResearchBrowserStorage(typeof window === 'undefined' ? null : window);
   const read = storageResult.ok ? wsResearchRead(storageResult.storage) : { state:wsResearchEmpty(), error:storageResult.error };
   if (read.error) {
@@ -298,13 +299,14 @@ function ResearchProjectSummary({ project, me, onOpen }) {
           <div><strong>{summary.blocked}</strong><span>Blocked</span></div>
           <div><strong>{summary.measurementTotal}</strong><span>Measurements</span></div>
         </div>
-      ) : <p className="ws-research-summary-empty">No operational tracking records yet. Add the first task, experiment, milestone, or measurement.</p>}
-      <button type="button" className="ws-button ws-button-quiet" onClick={onOpen}>{summary.workTotal || summary.measurementTotal ? 'Open Research' : 'Add first record'}</button>
+      ) : <p className="ws-research-summary-empty">{readOnly ? 'No operational tracking records were archived for this project.' : 'No operational tracking records yet. Add the first task, experiment, milestone, or measurement.'}</p>}
+      <button type="button" className="ws-button ws-button-quiet" onClick={onOpen}>{readOnly || summary.workTotal || summary.measurementTotal ? 'Open Research' : 'Add first record'}</button>
     </section>
   );
 }
 
 function ResearchProjectWorkspace({ project, me, people }) {
+  const readOnly = project.status === 'stashed' || project.status === 'archived';
   const initialRef = React.useRef(null);
   if (initialRef.current === null) {
     const storageResult = wsResearchBrowserStorage(typeof window === 'undefined' ? null : window);
@@ -358,6 +360,10 @@ function ResearchProjectWorkspace({ project, me, people }) {
   }
 
   function startCreate(kind) {
+    if (readOnly) {
+      setFeedback('This project is stashed. Its research tracking is read only until the project is resumed.');
+      return;
+    }
     if (storageBlocked) {
       setFeedback('Research actions are blocked until local storage can be read safely.');
       return;
@@ -389,6 +395,11 @@ function ResearchProjectWorkspace({ project, me, people }) {
 
   function saveForm(event) {
     event.preventDefault();
+    if (readOnly) {
+      setFormError('This project is stashed. Resume it before changing research tracking.');
+      focusError('');
+      return;
+    }
     if (!wsResearchHasProjectAccess(me, project)) {
       setFormError('This project is not available to the current identity. No change was made.');
       focusError('');
@@ -476,16 +487,17 @@ function ResearchProjectWorkspace({ project, me, people }) {
         actions={<><button type="button" className="ws-button ws-button-quiet" onClick={() => exportRecords('csv')}>Export CSV</button><button type="button" className="ws-button ws-button-quiet" onClick={() => exportRecords('json')}>Export history JSON</button></>}
       />
       {storageError && <div className="ws-alert ws-alert-danger" role="alert" tabIndex="-1" ref={storageAlertRef}><strong>Local research storage needs attention.</strong><span>{storageError}</span><span>Saved data was not replaced. Save and export actions are blocked when the stored state cannot be read.</span></div>}
+      {readOnly && <div className="ws-alert" role="status"><strong>Archived research tracking</strong><span>This record remains searchable and exportable, but it cannot be changed while the project is stashed.</span></div>}
       {feedback && <div className="ws-alert" role="status">{feedback}</div>}
 
-      <section className="ws-research-create" aria-label="Create a research tracking record">
+      {!readOnly && <section className="ws-research-create" aria-label="Create a research tracking record">
         <div><h2>Add team-entered tracking</h2><p>Enter only work or measurements the team explicitly recorded. Publishing research knowledge still happens through Add evidence.</p></div>
         <div className="ws-actions">
           {WS_RESEARCH_KIND_OPTIONS.map(option => <button type="button" className="ws-button" disabled={storageBlocked} key={option[0]} onClick={() => startCreate(option[0])}>Add {option[1].toLowerCase()}</button>)}
         </div>
-      </section>
+      </section>}
 
-      {form && (
+      {form && !readOnly && (
         <form className="ws-panel ws-research-form" onSubmit={saveForm} noValidate>
           <div className="ws-panel-head"><div><div className="ws-kicker">{form.id ? 'Edit creates a new immutable revision' : 'New tracking record'}</div><h2>{form.id ? 'Edit ' + wsResearchKindLabel(form.kind).toLowerCase() : 'Add ' + wsResearchKindLabel(form.kind).toLowerCase()}</h2></div>{form.id && <WsBadge>Revision {form.revision}</WsBadge>}</div>
           <div className="ws-panel-body">

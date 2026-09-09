@@ -134,6 +134,7 @@ function wsResearchHasProjectAccess(me, project) {
 function wsResearchCanEdit(item, me, project) {
   try {
     if (!wsResearchIsObject(item) || !wsResearchHasProjectAccess(me, project)) return false;
+    if (project.status === 'stashed' || project.status === 'archived') return false;
     if (item.projectId !== project.id || !wsResearchNonblank(me.k)) return false;
     const assignedOperationalOwner = item.ownerKey === me.k
       && ['task', 'experiment', 'milestone'].includes(item.kind);
