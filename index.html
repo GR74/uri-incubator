@@ -2823,6 +2823,133 @@ a.ws-row:hover {
   }
 }
 
+/* -- identity picker ------------------------------------------------------- */
+.ws-identity { position: relative; }
+.ws-identity-trigger {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border: 1px solid var(--ws-line, #c2c0ba); border-radius: 8px;
+  background: var(--ws-surface, #fafaf8); cursor: pointer; text-align: left;
+  transition: border-color .18s ease, background-color .18s ease;
+}
+.ws-identity-trigger:hover { border-color: #9c9a95; }
+/* the sidebar foot is dark; this button is light, so it cannot inherit colour */
+.ws-identity-trigger, .ws-identity-trigger strong { color: #1a1917; }
+.ws-identity-trigger .ws-avatar {
+  background: #1a1917; color: #f2f1ee; border: 0;
+  width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%;
+  font-family: "IBM Plex Mono", monospace; font-size: 10px; flex: 0 0 auto;
+}
+.ws-identity-option { color: #1a1917; }
+.ws-identity-option .ws-avatar {
+  background: rgba(26,25,23,.08); color: #1a1917; border: 1px solid #c2c0ba;
+  width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%;
+  font-family: "IBM Plex Mono", monospace; font-size: 10px; flex: 0 0 auto;
+}
+.ws-identity-option.is-active .ws-avatar { background: rgba(242,241,238,.16); color: #f2f1ee; border-color: rgba(242,241,238,.4); }
+.ws-identity-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.ws-identity-copy strong { font-size: 13px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-identity-tier {
+  align-self: flex-start; font-family: "IBM Plex Mono", monospace; font-size: 9px;
+  text-transform: uppercase; letter-spacing: .14em; padding: 2px 6px; border-radius: 3px;
+  background: rgba(74,72,68,.12); color: #4a4844;
+}
+.ws-identity-tier[data-tier="phd"] { background: rgba(65,100,124,.14); color: #2f4f66; }
+.ws-identity-tier[data-tier="pi"]  { background: rgba(187,0,0,.12);   color: #8f1414; }
+.ws-identity-tier[data-tier="alum"]{ background: rgba(156,154,149,.18); color: #6f6d69; }
+.ws-identity-caret { color: #9c9a95; font-size: 10px; }
+.ws-identity-menu {
+  position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 40;
+  max-height: 340px; overflow-y: auto; padding: 6px;
+  background: #fafaf8; border: 1px solid #c2c0ba; border-radius: 9px;
+  box-shadow: 0 26px 54px -26px rgba(26,25,23,.55);
+}
+.ws-identity-grouphead {
+  font-family: "IBM Plex Mono", monospace; font-size: 9px; text-transform: uppercase;
+  letter-spacing: .16em; color: #9c9a95; padding: 8px 8px 4px;
+}
+.ws-identity-option {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px;
+  border: 0; border-radius: 6px; background: transparent; cursor: pointer; text-align: left;
+}
+.ws-identity-option:hover { background: rgba(26,25,23,.05); }
+.ws-identity-option.is-active { background: #1a1917; color: #f2f1ee; }
+.ws-identity-option.is-active .ws-meta { color: rgba(242,241,238,.7); }
+.ws-identity-option .ws-meta { font-size: 11px; }
+
+/* -- hero map: drawn from the record, not decoration ----------------------- */
+.ws-hero-art svg path { stroke: rgba(242,241,238,.34); stroke-width: 1.4; }
+.ws-hero-art svg circle { stroke: rgba(242,241,238,.5); stroke-width: 1.4; fill: rgba(242,241,238,.08); }
+.ws-hero-art svg circle.ws-hero-you { fill: #bb0000; stroke: rgba(242,241,238,.85); stroke-width: 2; }
+
+/* -- markdown viewer ------------------------------------------------------- */
+.ws-md { max-width: 74ch; color: #26251f; }
+.ws-md h1, .ws-md h2, .ws-md h3, .ws-md h4 { font-family: Newsreader, Georgia, serif; font-weight: 400; line-height: 1.2; }
+.ws-md h1 { font-size: 27px; margin: 26px 0 10px; }
+.ws-md h2 { font-size: 21px; margin: 24px 0 8px; padding-bottom: 6px; border-bottom: 1px solid #d9d7d2; }
+.ws-md h3 { font-size: 17px; margin: 20px 0 6px; }
+.ws-md h4 { font-size: 14px; margin: 16px 0 4px; letter-spacing: .02em; }
+.ws-md > :first-child { margin-top: 0; }
+.ws-md p { margin: 0 0 12px; font-size: 14px; line-height: 1.68; }
+.ws-md ul { margin: 0 0 14px; padding-left: 18px; }
+.ws-md li { font-size: 14px; line-height: 1.62; margin-bottom: 5px; }
+.ws-md li::marker { color: #bb0000; }
+.ws-md blockquote {
+  margin: 0 0 14px; padding: 8px 0 8px 14px; border-left: 2px solid #bb0000;
+  font-family: Newsreader, Georgia, serif; font-style: italic; font-size: 15px; color: #3b3a37;
+}
+.ws-md hr { border: 0; border-top: 1px solid #d9d7d2; margin: 20px 0; }
+.ws-md code {
+  font-family: "IBM Plex Mono", monospace; font-size: 12.5px;
+  background: rgba(26,25,23,.06); padding: 1px 5px; border-radius: 3px;
+}
+.ws-md strong { font-weight: 600; }
+
+/* -- segmented toggle ------------------------------------------------------ */
+.ws-toggle { display: inline-flex; border: 1px solid #c2c0ba; border-radius: 6px; overflow: hidden; }
+.ws-toggle-item {
+  border: 0; background: transparent; cursor: pointer; padding: 5px 11px;
+  font-family: "IBM Plex Mono", monospace; font-size: 9.5px;
+  text-transform: uppercase; letter-spacing: .14em; color: #6f6d69;
+  transition: background-color .18s ease, color .18s ease;
+}
+.ws-toggle-item:hover { color: #1a1917; }
+.ws-toggle-item.is-active { background: #1a1917; color: #f2f1ee; }
+
+/* -- guided demo ----------------------------------------------------------- */
+.ws-demo-start { width: 100%; justify-content: center; margin-bottom: 8px; }
+.ws-demobar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  padding: 14px 24px; background: #141311; color: #edece8;
+  border-top: 2px solid #bb0000;
+  box-shadow: 0 -18px 46px -30px rgba(0,0,0,.85);
+}
+.ws-demobar-steps { display: flex; gap: 5px; flex: 0 0 auto; }
+.ws-demobar-dot {
+  width: 24px; height: 3px; border: 0; border-radius: 2px; padding: 0; cursor: pointer;
+  background: rgba(237,236,232,.22); transition: background-color .2s ease;
+}
+.ws-demobar-dot.is-done { background: rgba(237,236,232,.55); }
+.ws-demobar-dot.is-active { background: #bb0000; }
+.ws-demobar-copy { flex: 1 1 300px; min-width: 0; }
+.ws-demobar-meta {
+  font-family: "IBM Plex Mono", monospace; font-size: 9px; text-transform: uppercase;
+  letter-spacing: .16em; color: rgba(237,236,232,.55);
+}
+.ws-demobar-copy strong { display: block; font-family: Newsreader, Georgia, serif; font-size: 18px; font-weight: 400; margin-top: 2px; }
+.ws-demobar-copy p { margin: 3px 0 0; font-size: 12.5px; line-height: 1.55; color: rgba(237,236,232,.76); max-width: 88ch; }
+.ws-demobar-controls { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.ws-demobar .ws-button-quiet { background: transparent; color: rgba(237,236,232,.8); border-color: rgba(237,236,232,.3); }
+.ws-demobar .ws-button-quiet:hover:not(:disabled) { color: #edece8; border-color: rgba(237,236,232,.6); }
+.ws-demobar .ws-button-quiet:disabled { opacity: .35; cursor: not-allowed; }
+.ws-demobar .ws-button-primary { background: #bb0000; border-color: #bb0000; color: #f2f1ee; }
+.ws-demobar .ws-link { color: rgba(237,236,232,.6); }
+.ws-demobar .ws-link:hover { color: #edece8; }
+@media (max-width: 720px) {
+  .ws-demobar { gap: 12px; padding: 12px 16px; }
+  .ws-demobar-copy p { display: none; }
+}
+
 </style>
 <script>(()=>{var cv=Object.create;var ln=Object.defineProperty;var pv=Object.getOwnPropertyDescriptor;var dv=Object.getOwnPropertyNames;var hv=Object.getPrototypeOf,mv=Object.prototype.hasOwnProperty;var Jf=t=>ln(t,"__esModule",{value:!0});var Zf=t=>{if(typeof require!="undefined")return require(t);throw new Error('Dynamic require of "'+t+'" is not supported')};var _=(t,e)=>()=>(t&&(e=t(t=0)),e);var v=(t,e)=>()=>(e||t((e={exports:{}}).exports,e),e.exports),Qe=(t,e)=>{Jf(t);for(var r in e)ln(t,r,{get:e[r],enumerable:!0})},gv=(t,e,r)=>{if(e&&typeof e=="object"||typeof e=="function")for(let i of dv(e))!mv.call(t,i)&&i!=="default"&&ln(t,i,{get:()=>e[i],enumerable:!(r=pv(e,i))||r.enumerable});return t},pe=t=>gv(Jf(ln(t!=null?cv(hv(t)):{},"default",t&&t.__esModule&&"default"in t?{get:()=>t.default,enumerable:!0}:{value:t,enumerable:!0})),t);var h,u=_(()=>{h={platform:"",env:{},versions:{node:"14.17.6"}}});var yv,xe,dt=_(()=>{u();yv=0,xe={readFileSync:t=>self[t]||"",statSync:()=>({mtimeMs:yv++}),promises:{readFile:t=>Promise.resolve(self[t]||"")}}});var fa=v((gR,tc)=>{u();"use strict";var ec=class{constructor(e={}){if(!(e.maxSize&&e.maxSize>0))throw new TypeError("`maxSize` must be a number greater than 0");if(typeof e.maxAge=="number"&&e.maxAge===0)throw new TypeError("`maxAge` must be a number greater than 0");this.maxSize=e.maxSize,this.maxAge=e.maxAge||1/0,this.onEviction=e.onEviction,this.cache=new Map,this.oldCache=new Map,this._size=0}_emitEvictions(e){if(typeof this.onEviction=="function")for(let[r,i]of e)this.onEviction(r,i.value)}_deleteIfExpired(e,r){return typeof r.expiry=="number"&&r.expiry<=Date.now()?(typeof this.onEviction=="function"&&this.onEviction(e,r.value),this.delete(e)):!1}_getOrDeleteIfExpired(e,r){if(this._deleteIfExpired(e,r)===!1)return r.value}_getItemValue(e,r){return r.expiry?this._getOrDeleteIfExpired(e,r):r.value}_peek(e,r){let i=r.get(e);return this._getItemValue(e,i)}_set(e,r){this.cache.set(e,r),this._size++,this._size>=this.maxSize&&(this._size=0,this._emitEvictions(this.oldCache),this.oldCache=this.cache,this.cache=new Map)}_moveToRecent(e,r){this.oldCache.delete(e),this._set(e,r)}*_entriesAscending(){for(let e of this.oldCache){let[r,i]=e;this.cache.has(r)||this._deleteIfExpired(r,i)===!1&&(yield e)}for(let e of this.cache){let[r,i]=e;this._deleteIfExpired(r,i)===!1&&(yield e)}}get(e){if(this.cache.has(e)){let r=this.cache.get(e);return this._getItemValue(e,r)}if(this.oldCache.has(e)){let r=this.oldCache.get(e);if(this._deleteIfExpired(e,r)===!1)return this._moveToRecent(e,r),r.value}}set(e,r,{maxAge:i=this.maxAge===1/0?void 0:Date.now()+this.maxAge}={}){this.cache.has(e)?this.cache.set(e,{value:r,maxAge:i}):this._set(e,{value:r,expiry:i})}has(e){return this.cache.has(e)?!this._deleteIfExpired(e,this.cache.get(e)):this.oldCache.has(e)?!this._deleteIfExpired(e,this.oldCache.get(e)):!1}peek(e){if(this.cache.has(e))return this._peek(e,this.cache);if(this.oldCache.has(e))return this._peek(e,this.oldCache)}delete(e){let r=this.cache.delete(e);return r&&this._size--,this.oldCache.delete(e)||r}clear(){this.cache.clear(),this.oldCache.clear(),this._size=0}resize(e){if(!(e&&e>0))throw new TypeError("`maxSize` must be a number greater than 0");let r=[...this._entriesAscending()],i=r.length-e;i<0?(this.cache=new Map(r),this.oldCache=new Map,this._size=r.length):(i>0&&this._emitEvictions(r.slice(0,i)),this.oldCache=new Map(r.slice(i)),this.cache=new Map,this._size=0),this.maxSize=e}*keys(){for(let[e]of this)yield e}*values(){for(let[,e]of this)yield e}*[Symbol.iterator](){for(let e of this.cache){let[r,i]=e;this._deleteIfExpired(r,i)===!1&&(yield[r,i.value])}for(let e of this.oldCache){let[r,i]=e;this.cache.has(r)||this._deleteIfExpired(r,i)===!1&&(yield[r,i.value])}}*entriesDescending(){let e=[...this.cache];for(let r=e.length-1;r>=0;--r){let i=e[r],[n,s]=i;this._deleteIfExpired(n,s)===!1&&(yield[n,s.value])}e=[...this.oldCache];for(let r=e.length-1;r>=0;--r){let i=e[r],[n,s]=i;this.cache.has(n)||this._deleteIfExpired(n,s)===!1&&(yield[n,s.value])}}*entriesAscending(){for(let[e,r]of this._entriesAscending())yield[e,r.value]}get size(){if(!this._size)return this.oldCache.size;let e=0;for(let r of this.oldCache.keys())this.cache.has(r)||e++;return Math.min(this._size+e,this.maxSize)}};tc.exports=ec});var rc,ic=_(()=>{u();rc=t=>t&&t._hash});function un(t){return rc(t,{ignoreUnknown:!0})}var nc=_(()=>{u();ic()});function At(t){if(t=`${t}`,t==="0")return"0";if(/^[+-]?(\d+|\d*\.\d+)(e[+-]?\d+)?(%|\w+)?$/.test(t))return t.replace(/^[+-]?/,r=>r==="-"?"":"-");let e=["var","calc","min","max","clamp"];for(let r of e)if(t.includes(`${r}(`))return`calc(${t} * -1)`}var fn=_(()=>{u()});var sc,ac=_(()=>{u();sc=["preflight","container","accessibility","pointerEvents","visibility","position","inset","isolation","zIndex","order","gridColumn","gridColumnStart","gridColumnEnd","gridRow","gridRowStart","gridRowEnd","float","clear","margin","boxSizing","lineClamp","display","aspectRatio","size","height","maxHeight","minHeight","width","minWidth","maxWidth","flex","flexShrink","flexGrow","flexBasis","tableLayout","captionSide","borderCollapse","borderSpacing","transformOrigin","translate","rotate","skew","scale","transform","animation","cursor","touchAction","userSelect","resize","scrollSnapType","scrollSnapAlign","scrollSnapStop","scrollMargin","scrollPadding","listStylePosition","listStyleType","listStyleImage","appearance","columns","breakBefore","breakInside","breakAfter","gridAutoColumns","gridAutoFlow","gridAutoRows","gridTemplateColumns","gridTemplateRows","flexDirection","flexWrap","placeContent","placeItems","alignContent","alignItems","justifyContent","justifyItems","gap","space","divideWidth","divideStyle","divideColor","divideOpacity","placeSelf","alignSelf","justifySelf","overflow","overscrollBehavior","scrollBehavior","textOverflow","hyphens","whitespace","textWrap","wordBreak","borderRadius","borderWidth","borderStyle","borderColor","borderOpacity","backgroundColor","backgroundOpacity","backgroundImage","gradientColorStops","boxDecorationBreak","backgroundSize","backgroundAttachment","backgroundClip","backgroundPosition","backgroundRepeat","backgroundOrigin","fill","stroke","strokeWidth","objectFit","objectPosition","padding","textAlign","textIndent","verticalAlign","fontFamily","fontSize","fontWeight","textTransform","fontStyle","fontVariantNumeric","lineHeight","letterSpacing","textColor","textOpacity","textDecoration","textDecorationColor","textDecorationStyle","textDecorationThickness","textUnderlineOffset","fontSmoothing","placeholderColor","placeholderOpacity","caretColor","accentColor","opacity","backgroundBlendMode","mixBlendMode","boxShadow","boxShadowColor","outlineStyle","outlineWidth","outlineOffset","outlineColor","ringWidth","ringColor","ringOpacity","ringOffsetWidth","ringOffsetColor","blur","brightness","contrast","dropShadow","grayscale","hueRotate","invert","saturate","sepia","filter","backdropBlur","backdropBrightness","backdropContrast","backdropGrayscale","backdropHueRotate","backdropInvert","backdropOpacity","backdropSaturate","backdropSepia","backdropFilter","transitionProperty","transitionDelay","transitionDuration","transitionTimingFunction","willChange","contain","content","forcedColorAdjust"]});function oc(t,e){return t===void 0?e:Array.isArray(t)?t:[...new Set(e.filter(i=>t!==!1&&t[i]!==!1).concat(Object.keys(t).filter(i=>t[i]!==!1)))]}var lc=_(()=>{u()});var uc={};Qe(uc,{default:()=>me});var me,ir=_(()=>{u();me=new Proxy({},{get:()=>String})});function ca(t,e,r){typeof h!="undefined"&&h.env.JEST_WORKER_ID||r&&fc.has(r)||(r&&fc.add(r),console.warn(""),e.forEach(i=>console.warn(t,"-",i)))}function pa(t){return me.dim(t)}var fc,G,ze=_(()=>{u();ir();fc=new Set;G={info(t,e){ca(me.bold(me.cyan("info")),...Array.isArray(t)?[t]:[e,t])},warn(t,e){["content-problems"].includes(t)||ca(me.bold(me.yellow("warn")),...Array.isArray(t)?[t]:[e,t])},risk(t,e){ca(me.bold(me.magenta("risk")),...Array.isArray(t)?[t]:[e,t])}}});function Vr({version:t,from:e,to:r}){G.warn(`${e}-color-renamed`,[`As of Tailwind CSS ${t}, \`${e}\` has been renamed to \`${r}\`.`,"Update your configuration file to silence this warning."])}var cc,pc=_(()=>{u();ze();cc={inherit:"inherit",current:"currentColor",transparent:"transparent",black:"#000",white:"#fff",slate:{50:"#f8fafc",100:"#f1f5f9",200:"#e2e8f0",300:"#cbd5e1",400:"#94a3b8",500:"#64748b",600:"#475569",700:"#334155",800:"#1e293b",900:"#0f172a",950:"#020617"},gray:{50:"#f9fafb",100:"#f3f4f6",200:"#e5e7eb",300:"#d1d5db",400:"#9ca3af",500:"#6b7280",600:"#4b5563",700:"#374151",800:"#1f2937",900:"#111827",950:"#030712"},zinc:{50:"#fafafa",100:"#f4f4f5",200:"#e4e4e7",300:"#d4d4d8",400:"#a1a1aa",500:"#71717a",600:"#52525b",700:"#3f3f46",800:"#27272a",900:"#18181b",950:"#09090b"},neutral:{50:"#fafafa",100:"#f5f5f5",200:"#e5e5e5",300:"#d4d4d4",400:"#a3a3a3",500:"#737373",600:"#525252",700:"#404040",800:"#262626",900:"#171717",950:"#0a0a0a"},stone:{50:"#fafaf9",100:"#f5f5f4",200:"#e7e5e4",300:"#d6d3d1",400:"#a8a29e",500:"#78716c",600:"#57534e",700:"#44403c",800:"#292524",900:"#1c1917",950:"#0c0a09"},red:{50:"#fef2f2",100:"#fee2e2",200:"#fecaca",300:"#fca5a5",400:"#f87171",500:"#ef4444",600:"#dc2626",700:"#b91c1c",800:"#991b1b",900:"#7f1d1d",950:"#450a0a"},orange:{50:"#fff7ed",100:"#ffedd5",200:"#fed7aa",300:"#fdba74",400:"#fb923c",500:"#f97316",600:"#ea580c",700:"#c2410c",800:"#9a3412",900:"#7c2d12",950:"#431407"},amber:{50:"#fffbeb",100:"#fef3c7",200:"#fde68a",300:"#fcd34d",400:"#fbbf24",500:"#f59e0b",600:"#d97706",700:"#b45309",800:"#92400e",900:"#78350f",950:"#451a03"},yellow:{50:"#fefce8",100:"#fef9c3",200:"#fef08a",300:"#fde047",400:"#facc15",500:"#eab308",600:"#ca8a04",700:"#a16207",800:"#854d0e",900:"#713f12",950:"#422006"},lime:{50:"#f7fee7",100:"#ecfccb",200:"#d9f99d",300:"#bef264",400:"#a3e635",500:"#84cc16",600:"#65a30d",700:"#4d7c0f",800:"#3f6212",900:"#365314",950:"#1a2e05"},green:{50:"#f0fdf4",100:"#dcfce7",200:"#bbf7d0",300:"#86efac",400:"#4ade80",500:"#22c55e",600:"#16a34a",700:"#15803d",800:"#166534",900:"#14532d",950:"#052e16"},emerald:{50:"#ecfdf5",100:"#d1fae5",200:"#a7f3d0",300:"#6ee7b7",400:"#34d399",500:"#10b981",600:"#059669",700:"#047857",800:"#065f46",900:"#064e3b",950:"#022c22"},teal:{50:"#f0fdfa",100:"#ccfbf1",200:"#99f6e4",300:"#5eead4",400:"#2dd4bf",500:"#14b8a6",600:"#0d9488",700:"#0f766e",800:"#115e59",900:"#134e4a",950:"#042f2e"},cyan:{50:"#ecfeff",100:"#cffafe",200:"#a5f3fc",300:"#67e8f9",400:"#22d3ee",500:"#06b6d4",600:"#0891b2",700:"#0e7490",800:"#155e75",900:"#164e63",950:"#083344"},sky:{50:"#f0f9ff",100:"#e0f2fe",200:"#bae6fd",300:"#7dd3fc",400:"#38bdf8",500:"#0ea5e9",600:"#0284c7",700:"#0369a1",800:"#075985",900:"#0c4a6e",950:"#082f49"},blue:{50:"#eff6ff",100:"#dbeafe",200:"#bfdbfe",300:"#93c5fd",400:"#60a5fa",500:"#3b82f6",600:"#2563eb",700:"#1d4ed8",800:"#1e40af",900:"#1e3a8a",950:"#172554"},indigo:{50:"#eef2ff",100:"#e0e7ff",200:"#c7d2fe",300:"#a5b4fc",400:"#818cf8",500:"#6366f1",600:"#4f46e5",700:"#4338ca",800:"#3730a3",900:"#312e81",950:"#1e1b4b"},violet:{50:"#f5f3ff",100:"#ede9fe",200:"#ddd6fe",300:"#c4b5fd",400:"#a78bfa",500:"#8b5cf6",600:"#7c3aed",700:"#6d28d9",800:"#5b21b6",900:"#4c1d95",950:"#2e1065"},purple:{50:"#faf5ff",100:"#f3e8ff",200:"#e9d5ff",300:"#d8b4fe",400:"#c084fc",500:"#a855f7",600:"#9333ea",700:"#7e22ce",800:"#6b21a8",900:"#581c87",950:"#3b0764"},fuchsia:{50:"#fdf4ff",100:"#fae8ff",200:"#f5d0fe",300:"#f0abfc",400:"#e879f9",500:"#d946ef",600:"#c026d3",700:"#a21caf",800:"#86198f",900:"#701a75",950:"#4a044e"},pink:{50:"#fdf2f8",100:"#fce7f3",200:"#fbcfe8",300:"#f9a8d4",400:"#f472b6",500:"#ec4899",600:"#db2777",700:"#be185d",800:"#9d174d",900:"#831843",950:"#500724"},rose:{50:"#fff1f2",100:"#ffe4e6",200:"#fecdd3",300:"#fda4af",400:"#fb7185",500:"#f43f5e",600:"#e11d48",700:"#be123c",800:"#9f1239",900:"#881337",950:"#4c0519"},get lightBlue(){return Vr({version:"v2.2",from:"lightBlue",to:"sky"}),this.sky},get warmGray(){return Vr({version:"v3.0",from:"warmGray",to:"stone"}),this.stone},get trueGray(){return Vr({version:"v3.0",from:"trueGray",to:"neutral"}),this.neutral},get coolGray(){return Vr({version:"v3.0",from:"coolGray",to:"gray"}),this.gray},get blueGray(){return Vr({version:"v3.0",from:"blueGray",to:"slate"}),this.slate}}});function da(t,...e){for(let r of e){for(let i in r)t?.hasOwnProperty?.(i)||(t[i]=r[i]);for(let i of Object.getOwnPropertySymbols(r))t?.hasOwnProperty?.(i)||(t[i]=r[i])}return t}var dc=_(()=>{u()});function Ct(t){if(Array.isArray(t))return t;let e=t.split("[").length-1,r=t.split("]").length-1;if(e!==r)throw new Error(`Path is invalid. Has unbalanced brackets: ${t}`);return t.split(/\.(?![^\[]*\])|[\[\]]/g).filter(Boolean)}var cn=_(()=>{u()});function we(t,e){return pn.future.includes(e)?t.future==="all"||(t?.future?.[e]??hc[e]??!1):pn.experimental.includes(e)?t.experimental==="all"||(t?.experimental?.[e]??hc[e]??!1):!1}function mc(t){return t.experimental==="all"?pn.experimental:Object.keys(t?.experimental??{}).filter(e=>pn.experimental.includes(e)&&t.experimental[e])}function gc(t){if(h.env.JEST_WORKER_ID===void 0&&mc(t).length>0){let e=mc(t).map(r=>me.yellow(r)).join(", ");G.warn("experimental-flags-enabled",[`You have enabled experimental features: ${e}`,"Experimental features in Tailwind CSS are not covered by semver, may introduce breaking changes, and can change at any time."])}}var hc,pn,ht=_(()=>{u();ir();ze();hc={optimizeUniversalDefaults:!1,generalizedModifiers:!0,disableColorOpacityUtilitiesByDefault:!1,relativeContentPathsByDefault:!1},pn={future:["hoverOnlyWhenSupported","respectDefaultRingColorOpacity","disableColorOpacityUtilitiesByDefault","relativeContentPathsByDefault"],experimental:["optimizeUniversalDefaults","generalizedModifiers"]}});function yc(t){(()=>{if(t.purge||!t.content||!Array.isArray(t.content)&&!(typeof t.content=="object"&&t.content!==null))return!1;if(Array.isArray(t.content))return t.content.every(r=>typeof r=="string"?!0:!(typeof r?.raw!="string"||r?.extension&&typeof r?.extension!="string"));if(typeof t.content=="object"&&t.content!==null){if(Object.keys(t.content).some(r=>!["files","relative","extract","transform"].includes(r)))return!1;if(Array.isArray(t.content.files)){if(!t.content.files.every(r=>typeof r=="string"?!0:!(typeof r?.raw!="string"||r?.extension&&typeof r?.extension!="string")))return!1;if(typeof t.content.extract=="object"){for(let r of Object.values(t.content.extract))if(typeof r!="function")return!1}else if(!(t.content.extract===void 0||typeof t.content.extract=="function"))return!1;if(typeof t.content.transform=="object"){for(let r of Object.values(t.content.transform))if(typeof r!="function")return!1}else if(!(t.content.transform===void 0||typeof t.content.transform=="function"))return!1;if(typeof t.content.relative!="boolean"&&typeof t.content.relative!="undefined")return!1}return!0}return!1})()||G.warn("purge-deprecation",["The `purge`/`content` options have changed in Tailwind CSS v3.0.","Update your configuration file to eliminate this warning.","https://tailwindcss.com/docs/upgrade-guide#configure-content-sources"]),t.safelist=(()=>{let{content:r,purge:i,safelist:n}=t;return Array.isArray(n)?n:Array.isArray(r?.safelist)?r.safelist:Array.isArray(i?.safelist)?i.safelist:Array.isArray(i?.options?.safelist)?i.options.safelist:[]})(),t.blocklist=(()=>{let{blocklist:r}=t;if(Array.isArray(r)){if(r.every(i=>typeof i=="string"))return r;G.warn("blocklist-invalid",["The `blocklist` option must be an array of strings.","https://tailwindcss.com/docs/content-configuration#discarding-classes"])}return[]})(),typeof t.prefix=="function"?(G.warn("prefix-function",["As of Tailwind CSS v3.0, `prefix` cannot be a function.","Update `prefix` in your configuration to be a string to eliminate this warning.","https://tailwindcss.com/docs/upgrade-guide#prefix-cannot-be-a-function"]),t.prefix=""):t.prefix=t.prefix??"",t.content={relative:(()=>{let{content:r}=t;return r?.relative?r.relative:we(t,"relativeContentPathsByDefault")})(),files:(()=>{let{content:r,purge:i}=t;return Array.isArray(i)?i:Array.isArray(i?.content)?i.content:Array.isArray(r)?r:Array.isArray(r?.content)?r.content:Array.isArray(r?.files)?r.files:[]})(),extract:(()=>{let r=(()=>t.purge?.extract?t.purge.extract:t.content?.extract?t.content.extract:t.purge?.extract?.DEFAULT?t.purge.extract.DEFAULT:t.content?.extract?.DEFAULT?t.content.extract.DEFAULT:t.purge?.options?.extractors?t.purge.options.extractors:t.content?.options?.extractors?t.content.options.extractors:{})(),i={},n=(()=>{if(t.purge?.options?.defaultExtractor)return t.purge.options.defaultExtractor;if(t.content?.options?.defaultExtractor)return t.content.options.defaultExtractor})();if(n!==void 0&&(i.DEFAULT=n),typeof r=="function")i.DEFAULT=r;else if(Array.isArray(r))for(let{extensions:s,extractor:a}of r??[])for(let o of s)i[o]=a;else typeof r=="object"&&r!==null&&Object.assign(i,r);return i})(),transform:(()=>{let r=(()=>t.purge?.transform?t.purge.transform:t.content?.transform?t.content.transform:t.purge?.transform?.DEFAULT?t.purge.transform.DEFAULT:t.content?.transform?.DEFAULT?t.content.transform.DEFAULT:{})(),i={};return typeof r=="function"?i.DEFAULT=r:typeof r=="object"&&r!==null&&Object.assign(i,r),i})()};for(let r of t.content.files)if(typeof r=="string"&&/{([^,]*?)}/g.test(r)){G.warn("invalid-glob-braces",[`The glob pattern ${pa(r)} in your Tailwind CSS configuration is invalid.`,`Update it to ${pa(r.replace(/{([^,]*?)}/g,"$1"))} to silence this warning.`]);break}return t}var bc=_(()=>{u();ht();ze()});function Se(t){if(Object.prototype.toString.call(t)!=="[object Object]")return!1;let e=Object.getPrototypeOf(t);return e===null||Object.getPrototypeOf(e)===null}var nr=_(()=>{u()});function dn(t){return Array.isArray(t)?t.map(e=>dn(e)):typeof t=="object"&&t!==null?Object.fromEntries(Object.entries(t).map(([e,r])=>[e,dn(r)])):t}var xc=_(()=>{u()});function Yt(t){return t.replace(/\\,/g,"\\2c ")}var hn=_(()=>{u()});var ha,wc=_(()=>{u();ha={aliceblue:[240,248,255],antiquewhite:[250,235,215],aqua:[0,255,255],aquamarine:[127,255,212],azure:[240,255,255],beige:[245,245,220],bisque:[255,228,196],black:[0,0,0],blanchedalmond:[255,235,205],blue:[0,0,255],blueviolet:[138,43,226],brown:[165,42,42],burlywood:[222,184,135],cadetblue:[95,158,160],chartreuse:[127,255,0],chocolate:[210,105,30],coral:[255,127,80],cornflowerblue:[100,149,237],cornsilk:[255,248,220],crimson:[220,20,60],cyan:[0,255,255],darkblue:[0,0,139],darkcyan:[0,139,139],darkgoldenrod:[184,134,11],darkgray:[169,169,169],darkgreen:[0,100,0],darkgrey:[169,169,169],darkkhaki:[189,183,107],darkmagenta:[139,0,139],darkolivegreen:[85,107,47],darkorange:[255,140,0],darkorchid:[153,50,204],darkred:[139,0,0],darksalmon:[233,150,122],darkseagreen:[143,188,143],darkslateblue:[72,61,139],darkslategray:[47,79,79],darkslategrey:[47,79,79],darkturquoise:[0,206,209],darkviolet:[148,0,211],deeppink:[255,20,147],deepskyblue:[0,191,255],dimgray:[105,105,105],dimgrey:[105,105,105],dodgerblue:[30,144,255],firebrick:[178,34,34],floralwhite:[255,250,240],forestgreen:[34,139,34],fuchsia:[255,0,255],gainsboro:[220,220,220],ghostwhite:[248,248,255],gold:[255,215,0],goldenrod:[218,165,32],gray:[128,128,128],green:[0,128,0],greenyellow:[173,255,47],grey:[128,128,128],honeydew:[240,255,240],hotpink:[255,105,180],indianred:[205,92,92],indigo:[75,0,130],ivory:[255,255,240],khaki:[240,230,140],lavender:[230,230,250],lavenderblush:[255,240,245],lawngreen:[124,252,0],lemonchiffon:[255,250,205],lightblue:[173,216,230],lightcoral:[240,128,128],lightcyan:[224,255,255],lightgoldenrodyellow:[250,250,210],lightgray:[211,211,211],lightgreen:[144,238,144],lightgrey:[211,211,211],lightpink:[255,182,193],lightsalmon:[255,160,122],lightseagreen:[32,178,170],lightskyblue:[135,206,250],lightslategray:[119,136,153],lightslategrey:[119,136,153],lightsteelblue:[176,196,222],lightyellow:[255,255,224],lime:[0,255,0],limegreen:[50,205,50],linen:[250,240,230],magenta:[255,0,255],maroon:[128,0,0],mediumaquamarine:[102,205,170],mediumblue:[0,0,205],mediumorchid:[186,85,211],mediumpurple:[147,112,219],mediumseagreen:[60,179,113],mediumslateblue:[123,104,238],mediumspringgreen:[0,250,154],mediumturquoise:[72,209,204],mediumvioletred:[199,21,133],midnightblue:[25,25,112],mintcream:[245,255,250],mistyrose:[255,228,225],moccasin:[255,228,181],navajowhite:[255,222,173],navy:[0,0,128],oldlace:[253,245,230],olive:[128,128,0],olivedrab:[107,142,35],orange:[255,165,0],orangered:[255,69,0],orchid:[218,112,214],palegoldenrod:[238,232,170],palegreen:[152,251,152],paleturquoise:[175,238,238],palevioletred:[219,112,147],papayawhip:[255,239,213],peachpuff:[255,218,185],peru:[205,133,63],pink:[255,192,203],plum:[221,160,221],powderblue:[176,224,230],purple:[128,0,128],rebeccapurple:[102,51,153],red:[255,0,0],rosybrown:[188,143,143],royalblue:[65,105,225],saddlebrown:[139,69,19],salmon:[250,128,114],sandybrown:[244,164,96],seagreen:[46,139,87],seashell:[255,245,238],sienna:[160,82,45],silver:[192,192,192],skyblue:[135,206,235],slateblue:[106,90,205],slategray:[112,128,144],slategrey:[112,128,144],snow:[255,250,250],springgreen:[0,255,127],steelblue:[70,130,180],tan:[210,180,140],teal:[0,128,128],thistle:[216,191,216],tomato:[255,99,71],turquoise:[64,224,208],violet:[238,130,238],wheat:[245,222,179],white:[255,255,255],whitesmoke:[245,245,245],yellow:[255,255,0],yellowgreen:[154,205,50]}});function Hr(t,{loose:e=!1}={}){if(typeof t!="string")return null;if(t=t.trim(),t==="transparent")return{mode:"rgb",color:["0","0","0"],alpha:"0"};if(t in ha)return{mode:"rgb",color:ha[t].map(s=>s.toString())};let r=t.replace(xv,(s,a,o,l,c)=>["#",a,a,o,o,l,l,c?c+c:""].join("")).match(bv);if(r!==null)return{mode:"rgb",color:[parseInt(r[1],16),parseInt(r[2],16),parseInt(r[3],16)].map(s=>s.toString()),alpha:r[4]?(parseInt(r[4],16)/255).toString():void 0};let i=t.match(wv)??t.match(vv);if(i===null)return null;let n=[i[2],i[3],i[4]].filter(Boolean).map(s=>s.toString());return n.length===2&&n[0].startsWith("var(")?{mode:i[1],color:[n[0]],alpha:n[1]}:!e&&n.length!==3||n.length<3&&!n.some(s=>/^var\(.*?\)$/.test(s))?null:{mode:i[1],color:n,alpha:i[5]?.toString?.()}}function ma({mode:t,color:e,alpha:r}){let i=r!==void 0;return t==="rgba"||t==="hsla"?`${t}(${e.join(", ")}${i?`, ${r}`:""})`:`${t}(${e.join(" ")}${i?` / ${r}`:""})`}var bv,xv,Et,mn,vc,_t,wv,vv,ga=_(()=>{u();wc();bv=/^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})?$/i,xv=/^#([a-f\d])([a-f\d])([a-f\d])([a-f\d])?$/i,Et=/(?:\d+|\d*\.\d+)%?/,mn=/(?:\s*,\s*|\s+)/,vc=/\s*[,/]\s*/,_t=/var\(--(?:[^ )]*?)(?:,(?:[^ )]*?|var\(--[^ )]*?\)))?\)/,wv=new RegExp(`^(rgba?)\\(\\s*(${Et.source}|${_t.source})(?:${mn.source}(${Et.source}|${_t.source}))?(?:${mn.source}(${Et.source}|${_t.source}))?(?:${vc.source}(${Et.source}|${_t.source}))?\\s*\\)$`),vv=new RegExp(`^(hsla?)\\(\\s*((?:${Et.source})(?:deg|rad|grad|turn)?|${_t.source})(?:${mn.source}(${Et.source}|${_t.source}))?(?:${mn.source}(${Et.source}|${_t.source}))?(?:${vc.source}(${Et.source}|${_t.source}))?\\s*\\)$`)});function et(t,e,r){if(typeof t=="function")return t({opacityValue:e});let i=Hr(t,{loose:!0});return i===null?r:ma({...i,alpha:e})}function Ce({color:t,property:e,variable:r}){let i=[].concat(e);if(typeof t=="function")return{[r]:"1",...Object.fromEntries(i.map(s=>[s,t({opacityVariable:r,opacityValue:`var(${r}, 1)`})]))};let n=Hr(t);return n===null?Object.fromEntries(i.map(s=>[s,t])):n.alpha!==void 0?Object.fromEntries(i.map(s=>[s,t])):{[r]:"1",...Object.fromEntries(i.map(s=>[s,ma({...n,alpha:`var(${r}, 1)`})]))}}var Wr=_(()=>{u();ga()});function ve(t,e){let r=[],i=[],n=0,s=!1;for(let a=0;a<t.length;a++){let o=t[a];r.length===0&&o===e[0]&&!s&&(e.length===1||t.slice(a,a+e.length)===e)&&(i.push(t.slice(n,a)),n=a+e.length),s=s?!1:o==="\\",o==="("||o==="["||o==="{"?r.push(o):(o===")"&&r[r.length-1]==="("||o==="]"&&r[r.length-1]==="["||o==="}"&&r[r.length-1]==="{")&&r.pop()}return i.push(t.slice(n)),i}var Qt=_(()=>{u()});function gn(t){return ve(t,",").map(r=>{let i=r.trim(),n={raw:i},s=i.split(Sv),a=new Set;for(let o of s)kc.lastIndex=0,!a.has("KEYWORD")&&kv.has(o)?(n.keyword=o,a.add("KEYWORD")):kc.test(o)?a.has("X")?a.has("Y")?a.has("BLUR")?a.has("SPREAD")||(n.spread=o,a.add("SPREAD")):(n.blur=o,a.add("BLUR")):(n.y=o,a.add("Y")):(n.x=o,a.add("X")):n.color?(n.unknown||(n.unknown=[]),n.unknown.push(o)):n.color=o;return n.valid=n.x!==void 0&&n.y!==void 0,n})}function Sc(t){return t.map(e=>e.valid?[e.keyword,e.x,e.y,e.blur,e.spread,e.color].filter(Boolean).join(" "):e.raw).join(", ")}var kv,Sv,kc,ya=_(()=>{u();Qt();kv=new Set(["inset","inherit","initial","revert","unset"]),Sv=/\ +(?![^(]*\))/g,kc=/^-?(\d+|\.\d+)(.*?)$/g});function ba(t){return Av.some(e=>new RegExp(`^${e}\\(.*\\)`).test(t))}function K(t,e=null,r=!0){let i=e&&Cv.has(e.property);return t.startsWith("--")&&!i?`var(${t})`:t.includes("url(")?t.split(/(url\(.*?\))/g).filter(Boolean).map(n=>/^url\(.*?\)$/.test(n)?n:K(n,e,!1)).join(""):(t=t.replace(/([^\\])_+/g,(n,s)=>s+" ".repeat(n.length-1)).replace(/^_/g," ").replace(/\\_/g,"_"),r&&(t=t.trim()),t=Ev(t),t)}function Ke(t){return t.includes("=")&&(t=t.replace(/(=.*)/g,(e,r)=>{if(r[1]==="'"||r[1]==='"')return r;if(r.length>2){let i=r[r.length-1];if(r[r.length-2]===" "&&(i==="i"||i==="I"||i==="s"||i==="S"))return`="${r.slice(1,-2)}" ${r[r.length-1]}`}return`="${r.slice(1)}"`})),t}function Ev(t){let e=["theme"],r=["min-content","max-content","fit-content","safe-area-inset-top","safe-area-inset-right","safe-area-inset-bottom","safe-area-inset-left","titlebar-area-x","titlebar-area-y","titlebar-area-width","titlebar-area-height","keyboard-inset-top","keyboard-inset-right","keyboard-inset-bottom","keyboard-inset-left","keyboard-inset-width","keyboard-inset-height","radial-gradient","linear-gradient","conic-gradient","repeating-radial-gradient","repeating-linear-gradient","repeating-conic-gradient","anchor-size"];return t.replace(/(calc|min|max|clamp)\(.+\)/g,i=>{let n="";function s(){let a=n.trimEnd();return a[a.length-1]}for(let a=0;a<i.length;a++){let o=function(f){return f.split("").every((d,p)=>i[a+p]===d)},l=function(f){let d=1/0;for(let m of f){let b=i.indexOf(m,a);b!==-1&&b<d&&(d=b)}let p=i.slice(a,d);return a+=p.length-1,p},c=i[a];if(o("var"))n+=l([")",","]);else if(r.some(f=>o(f))){let f=r.find(d=>o(d));n+=f,a+=f.length-1}else e.some(f=>o(f))?n+=l([")"]):o("[")?n+=l(["]"]):["+","-","*","/"].includes(c)&&!["(","+","-","*","/",","].includes(s())?n+=` ${c} `:n+=c}return n.replace(/\s+/g," ")})}function xa(t){return t.startsWith("url(")}function wa(t){return!isNaN(Number(t))||ba(t)}function Gr(t){return t.endsWith("%")&&wa(t.slice(0,-1))||ba(t)}function Yr(t){return t==="0"||new RegExp(`^[+-]?[0-9]*.?[0-9]+(?:[eE][+-]?[0-9]+)?${Ov}$`).test(t)||ba(t)}function Ac(t){return Tv.has(t)}function Cc(t){let e=gn(K(t));for(let r of e)if(!r.valid)return!1;return!0}function Ec(t){let e=0;return ve(t,"_").every(i=>(i=K(i),i.startsWith("var(")?!0:Hr(i,{loose:!0})!==null?(e++,!0):!1))?e>0:!1}function _c(t){let e=0;return ve(t,",").every(i=>(i=K(i),i.startsWith("var(")?!0:xa(i)||Pv(i)||["element(","image(","cross-fade(","image-set("].some(n=>i.startsWith(n))?(e++,!0):!1))?e>0:!1}function Pv(t){t=K(t);for(let e of Rv)if(t.startsWith(`${e}(`))return!0;return!1}function Oc(t){let e=0;return ve(t,"_").every(i=>(i=K(i),i.startsWith("var(")?!0:Iv.has(i)||Yr(i)||Gr(i)?(e++,!0):!1))?e>0:!1}function Tc(t){let e=0;return ve(t,",").every(i=>(i=K(i),i.startsWith("var(")?!0:i.includes(" ")&&!/(['"])([^"']+)\1/g.test(i)||/^\d/g.test(i)?!1:(e++,!0)))?e>0:!1}function Rc(t){return Dv.has(t)}function Pc(t){return $v.has(t)}function Ic(t){return Lv.has(t)}var Av,Cv,_v,Ov,Tv,Rv,Iv,Dv,$v,Lv,Qr=_(()=>{u();ga();ya();Qt();Av=["min","max","clamp","calc"];Cv=new Set(["scroll-timeline-name","timeline-scope","view-timeline-name","font-palette","anchor-name","anchor-scope","position-anchor","position-try-options","scroll-timeline","animation-timeline","view-timeline","position-try"]);_v=["cm","mm","Q","in","pc","pt","px","em","ex","ch","rem","lh","rlh","vw","vh","vmin","vmax","vb","vi","svw","svh","lvw","lvh","dvw","dvh","cqw","cqh","cqi","cqb","cqmin","cqmax"],Ov=`(?:${_v.join("|")})`;Tv=new Set(["thin","medium","thick"]);Rv=new Set(["conic-gradient","linear-gradient","radial-gradient","repeating-conic-gradient","repeating-linear-gradient","repeating-radial-gradient"]);Iv=new Set(["center","top","right","bottom","left"]);Dv=new Set(["serif","sans-serif","monospace","cursive","fantasy","system-ui","ui-serif","ui-sans-serif","ui-monospace","ui-rounded","math","emoji","fangsong"]);$v=new Set(["xx-small","x-small","small","medium","large","x-large","xx-large","xxx-large"]);Lv=new Set(["larger","smaller"])});function Dc(t){let e=["cover","contain"];return ve(t,",").every(r=>{let i=ve(r,"_").filter(Boolean);return i.length===1&&e.includes(i[0])?!0:i.length!==1&&i.length!==2?!1:i.every(n=>Yr(n)||Gr(n)||n==="auto")})}var $c=_(()=>{u();Qr();Qt()});function Lc(t,e){t.walkClasses(r=>{r.value=e(r.value),r.raws&&r.raws.value&&(r.raws.value=Yt(r.raws.value))})}function qc(t,e){if(!Ot(t))return;let r=t.slice(1,-1);if(!!e(r))return K(r)}function qv(t,e={},r){let i=e[t];if(i!==void 0)return At(i);if(Ot(t)){let n=qc(t,r);return n===void 0?void 0:At(n)}}function yn(t,e={},{validate:r=()=>!0}={}){let i=e.values?.[t];return i!==void 0?i:e.supportsNegativeValues&&t.startsWith("-")?qv(t.slice(1),e.values,r):qc(t,r)}function Ot(t){return t.startsWith("[")&&t.endsWith("]")}function Mc(t){let e=t.lastIndexOf("/"),r=t.lastIndexOf("[",e),i=t.indexOf("]",e);return t[e-1]==="]"||t[e+1]==="["||r!==-1&&i!==-1&&r<e&&e<i&&(e=t.lastIndexOf("/",r)),e===-1||e===t.length-1?[t,void 0]:Ot(t)&&!t.includes("]/[")?[t,void 0]:[t.slice(0,e),t.slice(e+1)]}function sr(t){if(typeof t=="string"&&t.includes("<alpha-value>")){let e=t;return({opacityValue:r=1})=>e.replace(/<alpha-value>/g,r)}return t}function Nc(t){return K(t.slice(1,-1))}function Mv(t,e={},{tailwindConfig:r={}}={}){if(e.values?.[t]!==void 0)return sr(e.values?.[t]);let[i,n]=Mc(t);if(n!==void 0){let s=e.values?.[i]??(Ot(i)?i.slice(1,-1):void 0);return s===void 0?void 0:(s=sr(s),Ot(n)?et(s,Nc(n)):r.theme?.opacity?.[n]===void 0?void 0:et(s,r.theme.opacity[n]))}return yn(t,e,{validate:Ec})}function Nv(t,e={}){return e.values?.[t]}function Le(t){return(e,r)=>yn(e,r,{validate:t})}function Bv(t,e){let r=t.indexOf(e);return r===-1?[void 0,t]:[t.slice(0,r),t.slice(r+1)]}function ka(t,e,r,i){if(r.values&&e in r.values)for(let{type:s}of t??[]){let a=va[s](e,r,{tailwindConfig:i});if(a!==void 0)return[a,s,null]}if(Ot(e)){let s=e.slice(1,-1),[a,o]=Bv(s,":");if(!/^[\w-_]+$/g.test(a))o=s;else if(a!==void 0&&!Bc.includes(a))return[];if(o.length>0&&Bc.includes(a))return[yn(`[${o}]`,r),a,null]}let n=Sa(t,e,r,i);for(let s of n)return s;return[]}function*Sa(t,e,r,i){let n=we(i,"generalizedModifiers"),[s,a]=Mc(e);if(n&&r.modifiers!=null&&(r.modifiers==="any"||typeof r.modifiers=="object"&&(a&&Ot(a)||a in r.modifiers))||(s=e,a=void 0),a!==void 0&&s===""&&(s="DEFAULT"),a!==void 0&&typeof r.modifiers=="object"){let l=r.modifiers?.[a]??null;l!==null?a=l:Ot(a)&&(a=Nc(a))}for(let{type:l}of t??[]){let c=va[l](s,r,{tailwindConfig:i});c!==void 0&&(yield[c,l,a??null])}}var va,Bc,Kr=_(()=>{u();hn();Wr();Qr();fn();$c();ht();va={any:yn,color:Mv,url:Le(xa),image:Le(_c),length:Le(Yr),percentage:Le(Gr),position:Le(Oc),lookup:Nv,"generic-name":Le(Rc),"family-name":Le(Tc),number:Le(wa),"line-width":Le(Ac),"absolute-size":Le(Pc),"relative-size":Le(Ic),shadow:Le(Cc),size:Le(Dc)},Bc=Object.keys(va)});function X(t){return typeof t=="function"?t({}):t}var Aa=_(()=>{u()});function ar(t){return typeof t=="function"}function Xr(t,...e){let r=e.pop();for(let i of e)for(let n in i){let s=r(t[n],i[n]);s===void 0?Se(t[n])&&Se(i[n])?t[n]=Xr({},t[n],i[n],r):t[n]=i[n]:t[n]=s}return t}function Fv(t,...e){return ar(t)?t(...e):t}function zv(t){return t.reduce((e,{extend:r})=>Xr(e,r,(i,n)=>i===void 0?[n]:Array.isArray(i)?[n,...i]:[n,i]),{})}function jv(t){return{...t.reduce((e,r)=>da(e,r),{}),extend:zv(t)}}function Fc(t,e){if(Array.isArray(t)&&Se(t[0]))return t.concat(e);if(Array.isArray(e)&&Se(e[0])&&Se(t))return[t,...e];if(Array.isArray(e))return e}function Uv({extend:t,...e}){return Xr(e,t,(r,i)=>!ar(r)&&!i.some(ar)?Xr({},r,...i,Fc):(n,s)=>Xr({},...[r,...i].map(a=>Fv(a,n,s)),Fc))}function*Vv(t){let e=Ct(t);if(e.length===0||(yield e,Array.isArray(t)))return;let r=/^(.*?)\s*\/\s*([^/]+)$/,i=t.match(r);if(i!==null){let[,n,s]=i,a=Ct(n);a.alpha=s,yield a}}function Hv(t){let e=(r,i)=>{for(let n of Vv(r)){let s=0,a=t;for(;a!=null&&s<n.length;)a=a[n[s++]],a=ar(a)&&(n.alpha===void 0||s<=n.length-1)?a(e,Ca):a;if(a!==void 0){if(n.alpha!==void 0){let o=sr(a);return et(o,n.alpha,X(o))}return Se(a)?dn(a):a}}return i};return Object.assign(e,{theme:e,...Ca}),Object.keys(t).reduce((r,i)=>(r[i]=ar(t[i])?t[i](e,Ca):t[i],r),{})}function zc(t){let e=[];return t.forEach(r=>{e=[...e,r];let i=r?.plugins??[];i.length!==0&&i.forEach(n=>{n.__isOptionsFunction&&(n=n()),e=[...e,...zc([n?.config??{}])]})}),e}function Wv(t){return[...t].reduceRight((r,i)=>ar(i)?i({corePlugins:r}):oc(i,r),sc)}function Gv(t){return[...t].reduceRight((r,i)=>[...r,...i],[])}function Ea(t){let e=[...zc(t),{prefix:"",important:!1,separator:":"}];return yc(da({theme:Hv(Uv(jv(e.map(r=>r?.theme??{})))),corePlugins:Wv(e.map(r=>r.corePlugins)),plugins:Gv(t.map(r=>r?.plugins??[]))},...e))}var Ca,jc=_(()=>{u();fn();ac();lc();pc();dc();cn();bc();nr();xc();Kr();Wr();Aa();Ca={colors:cc,negative(t){return Object.keys(t).filter(e=>t[e]!=="0").reduce((e,r)=>{let i=At(t[r]);return i!==void 0&&(e[`-${r}`]=i),e},{})},breakpoints(t){return Object.keys(t).filter(e=>typeof t[e]=="string").reduce((e,r)=>({...e,[`screen-${r}`]:t[r]}),{})}}});var Vc=v((wP,Uc)=>{u();Uc.exports={content:[],presets:[],darkMode:"media",theme:{accentColor:({theme:t})=>({...t("colors"),auto:"auto"}),animation:{none:"none",spin:"spin 1s linear infinite",ping:"ping 1s cubic-bezier(0, 0, 0.2, 1) infinite",pulse:"pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",bounce:"bounce 1s infinite"},aria:{busy:'busy="true"',checked:'checked="true"',disabled:'disabled="true"',expanded:'expanded="true"',hidden:'hidden="true"',pressed:'pressed="true"',readonly:'readonly="true"',required:'required="true"',selected:'selected="true"'},aspectRatio:{auto:"auto",square:"1 / 1",video:"16 / 9"},backdropBlur:({theme:t})=>t("blur"),backdropBrightness:({theme:t})=>t("brightness"),backdropContrast:({theme:t})=>t("contrast"),backdropGrayscale:({theme:t})=>t("grayscale"),backdropHueRotate:({theme:t})=>t("hueRotate"),backdropInvert:({theme:t})=>t("invert"),backdropOpacity:({theme:t})=>t("opacity"),backdropSaturate:({theme:t})=>t("saturate"),backdropSepia:({theme:t})=>t("sepia"),backgroundColor:({theme:t})=>t("colors"),backgroundImage:{none:"none","gradient-to-t":"linear-gradient(to top, var(--tw-gradient-stops))","gradient-to-tr":"linear-gradient(to top right, var(--tw-gradient-stops))","gradient-to-r":"linear-gradient(to right, var(--tw-gradient-stops))","gradient-to-br":"linear-gradient(to bottom right, var(--tw-gradient-stops))","gradient-to-b":"linear-gradient(to bottom, var(--tw-gradient-stops))","gradient-to-bl":"linear-gradient(to bottom left, var(--tw-gradient-stops))","gradient-to-l":"linear-gradient(to left, var(--tw-gradient-stops))","gradient-to-tl":"linear-gradient(to top left, var(--tw-gradient-stops))"},backgroundOpacity:({theme:t})=>t("opacity"),backgroundPosition:{bottom:"bottom",center:"center",left:"left","left-bottom":"left bottom","left-top":"left top",right:"right","right-bottom":"right bottom","right-top":"right top",top:"top"},backgroundSize:{auto:"auto",cover:"cover",contain:"contain"},blur:{0:"0",none:"",sm:"4px",DEFAULT:"8px",md:"12px",lg:"16px",xl:"24px","2xl":"40px","3xl":"64px"},borderColor:({theme:t})=>({...t("colors"),DEFAULT:t("colors.gray.200","currentColor")}),borderOpacity:({theme:t})=>t("opacity"),borderRadius:{none:"0px",sm:"0.125rem",DEFAULT:"0.25rem",md:"0.375rem",lg:"0.5rem",xl:"0.75rem","2xl":"1rem","3xl":"1.5rem",full:"9999px"},borderSpacing:({theme:t})=>({...t("spacing")}),borderWidth:{DEFAULT:"1px",0:"0px",2:"2px",4:"4px",8:"8px"},boxShadow:{sm:"0 1px 2px 0 rgb(0 0 0 / 0.05)",DEFAULT:"0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",md:"0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",lg:"0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",xl:"0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)","2xl":"0 25px 50px -12px rgb(0 0 0 / 0.25)",inner:"inset 0 2px 4px 0 rgb(0 0 0 / 0.05)",none:"none"},boxShadowColor:({theme:t})=>t("colors"),brightness:{0:"0",50:".5",75:".75",90:".9",95:".95",100:"1",105:"1.05",110:"1.1",125:"1.25",150:"1.5",200:"2"},caretColor:({theme:t})=>t("colors"),colors:({colors:t})=>({inherit:t.inherit,current:t.current,transparent:t.transparent,black:t.black,white:t.white,slate:t.slate,gray:t.gray,zinc:t.zinc,neutral:t.neutral,stone:t.stone,red:t.red,orange:t.orange,amber:t.amber,yellow:t.yellow,lime:t.lime,green:t.green,emerald:t.emerald,teal:t.teal,cyan:t.cyan,sky:t.sky,blue:t.blue,indigo:t.indigo,violet:t.violet,purple:t.purple,fuchsia:t.fuchsia,pink:t.pink,rose:t.rose}),columns:{auto:"auto",1:"1",2:"2",3:"3",4:"4",5:"5",6:"6",7:"7",8:"8",9:"9",10:"10",11:"11",12:"12","3xs":"16rem","2xs":"18rem",xs:"20rem",sm:"24rem",md:"28rem",lg:"32rem",xl:"36rem","2xl":"42rem","3xl":"48rem","4xl":"56rem","5xl":"64rem","6xl":"72rem","7xl":"80rem"},container:{},content:{none:"none"},contrast:{0:"0",50:".5",75:".75",100:"1",125:"1.25",150:"1.5",200:"2"},cursor:{auto:"auto",default:"default",pointer:"pointer",wait:"wait",text:"text",move:"move",help:"help","not-allowed":"not-allowed",none:"none","context-menu":"context-menu",progress:"progress",cell:"cell",crosshair:"crosshair","vertical-text":"vertical-text",alias:"alias",copy:"copy","no-drop":"no-drop",grab:"grab",grabbing:"grabbing","all-scroll":"all-scroll","col-resize":"col-resize","row-resize":"row-resize","n-resize":"n-resize","e-resize":"e-resize","s-resize":"s-resize","w-resize":"w-resize","ne-resize":"ne-resize","nw-resize":"nw-resize","se-resize":"se-resize","sw-resize":"sw-resize","ew-resize":"ew-resize","ns-resize":"ns-resize","nesw-resize":"nesw-resize","nwse-resize":"nwse-resize","zoom-in":"zoom-in","zoom-out":"zoom-out"},divideColor:({theme:t})=>t("borderColor"),divideOpacity:({theme:t})=>t("borderOpacity"),divideWidth:({theme:t})=>t("borderWidth"),dropShadow:{sm:"0 1px 1px rgb(0 0 0 / 0.05)",DEFAULT:["0 1px 2px rgb(0 0 0 / 0.1)","0 1px 1px rgb(0 0 0 / 0.06)"],md:["0 4px 3px rgb(0 0 0 / 0.07)","0 2px 2px rgb(0 0 0 / 0.06)"],lg:["0 10px 8px rgb(0 0 0 / 0.04)","0 4px 3px rgb(0 0 0 / 0.1)"],xl:["0 20px 13px rgb(0 0 0 / 0.03)","0 8px 5px rgb(0 0 0 / 0.08)"],"2xl":"0 25px 25px rgb(0 0 0 / 0.15)",none:"0 0 #0000"},fill:({theme:t})=>({none:"none",...t("colors")}),flex:{1:"1 1 0%",auto:"1 1 auto",initial:"0 1 auto",none:"none"},flexBasis:({theme:t})=>({auto:"auto",...t("spacing"),"1/2":"50%","1/3":"33.333333%","2/3":"66.666667%","1/4":"25%","2/4":"50%","3/4":"75%","1/5":"20%","2/5":"40%","3/5":"60%","4/5":"80%","1/6":"16.666667%","2/6":"33.333333%","3/6":"50%","4/6":"66.666667%","5/6":"83.333333%","1/12":"8.333333%","2/12":"16.666667%","3/12":"25%","4/12":"33.333333%","5/12":"41.666667%","6/12":"50%","7/12":"58.333333%","8/12":"66.666667%","9/12":"75%","10/12":"83.333333%","11/12":"91.666667%",full:"100%"}),flexGrow:{0:"0",DEFAULT:"1"},flexShrink:{0:"0",DEFAULT:"1"},fontFamily:{sans:["ui-sans-serif","system-ui","sans-serif",'"Apple Color Emoji"','"Segoe UI Emoji"','"Segoe UI Symbol"','"Noto Color Emoji"'],serif:["ui-serif","Georgia","Cambria",'"Times New Roman"',"Times","serif"],mono:["ui-monospace","SFMono-Regular","Menlo","Monaco","Consolas",'"Liberation Mono"','"Courier New"',"monospace"]},fontSize:{xs:["0.75rem",{lineHeight:"1rem"}],sm:["0.875rem",{lineHeight:"1.25rem"}],base:["1rem",{lineHeight:"1.5rem"}],lg:["1.125rem",{lineHeight:"1.75rem"}],xl:["1.25rem",{lineHeight:"1.75rem"}],"2xl":["1.5rem",{lineHeight:"2rem"}],"3xl":["1.875rem",{lineHeight:"2.25rem"}],"4xl":["2.25rem",{lineHeight:"2.5rem"}],"5xl":["3rem",{lineHeight:"1"}],"6xl":["3.75rem",{lineHeight:"1"}],"7xl":["4.5rem",{lineHeight:"1"}],"8xl":["6rem",{lineHeight:"1"}],"9xl":["8rem",{lineHeight:"1"}]},fontWeight:{thin:"100",extralight:"200",light:"300",normal:"400",medium:"500",semibold:"600",bold:"700",extrabold:"800",black:"900"},gap:({theme:t})=>t("spacing"),gradientColorStops:({theme:t})=>t("colors"),gradientColorStopPositions:{"0%":"0%","5%":"5%","10%":"10%","15%":"15%","20%":"20%","25%":"25%","30%":"30%","35%":"35%","40%":"40%","45%":"45%","50%":"50%","55%":"55%","60%":"60%","65%":"65%","70%":"70%","75%":"75%","80%":"80%","85%":"85%","90%":"90%","95%":"95%","100%":"100%"},grayscale:{0:"0",DEFAULT:"100%"},gridAutoColumns:{auto:"auto",min:"min-content",max:"max-content",fr:"minmax(0, 1fr)"},gridAutoRows:{auto:"auto",min:"min-content",max:"max-content",fr:"minmax(0, 1fr)"},gridColumn:{auto:"auto","span-1":"span 1 / span 1","span-2":"span 2 / span 2","span-3":"span 3 / span 3","span-4":"span 4 / span 4","span-5":"span 5 / span 5","span-6":"span 6 / span 6","span-7":"span 7 / span 7","span-8":"span 8 / span 8","span-9":"span 9 / span 9","span-10":"span 10 / span 10","span-11":"span 11 / span 11","span-12":"span 12 / span 12","span-full":"1 / -1"},gridColumnEnd:{auto:"auto",1:"1",2:"2",3:"3",4:"4",5:"5",6:"6",7:"7",8:"8",9:"9",10:"10",11:"11",12:"12",13:"13"},gridColumnStart:{auto:"auto",1:"1",2:"2",3:"3",4:"4",5:"5",6:"6",7:"7",8:"8",9:"9",10:"10",11:"11",12:"12",13:"13"},gridRow:{auto:"auto","span-1":"span 1 / span 1","span-2":"span 2 / span 2","span-3":"span 3 / span 3","span-4":"span 4 / span 4","span-5":"span 5 / span 5","span-6":"span 6 / span 6","span-7":"span 7 / span 7","span-8":"span 8 / span 8","span-9":"span 9 / span 9","span-10":"span 10 / span 10","span-11":"span 11 / span 11","span-12":"span 12 / span 12","span-full":"1 / -1"},gridRowEnd:{auto:"auto",1:"1",2:"2",3:"3",4:"4",5:"5",6:"6",7:"7",8:"8",9:"9",10:"10",11:"11",12:"12",13:"13"},gridRowStart:{auto:"auto",1:"1",2:"2",3:"3",4:"4",5:"5",6:"6",7:"7",8:"8",9:"9",10:"10",11:"11",12:"12",13:"13"},gridTemplateColumns:{none:"none",subgrid:"subgrid",1:"repeat(1, minmax(0, 1fr))",2:"repeat(2, minmax(0, 1fr))",3:"repeat(3, minmax(0, 1fr))",4:"repeat(4, minmax(0, 1fr))",5:"repeat(5, minmax(0, 1fr))",6:"repeat(6, minmax(0, 1fr))",7:"repeat(7, minmax(0, 1fr))",8:"repeat(8, minmax(0, 1fr))",9:"repeat(9, minmax(0, 1fr))",10:"repeat(10, minmax(0, 1fr))",11:"repeat(11, minmax(0, 1fr))",12:"repeat(12, minmax(0, 1fr))"},gridTemplateRows:{none:"none",subgrid:"subgrid",1:"repeat(1, minmax(0, 1fr))",2:"repeat(2, minmax(0, 1fr))",3:"repeat(3, minmax(0, 1fr))",4:"repeat(4, minmax(0, 1fr))",5:"repeat(5, minmax(0, 1fr))",6:"repeat(6, minmax(0, 1fr))",7:"repeat(7, minmax(0, 1fr))",8:"repeat(8, minmax(0, 1fr))",9:"repeat(9, minmax(0, 1fr))",10:"repeat(10, minmax(0, 1fr))",11:"repeat(11, minmax(0, 1fr))",12:"repeat(12, minmax(0, 1fr))"},height:({theme:t})=>({auto:"auto",...t("spacing"),"1/2":"50%","1/3":"33.333333%","2/3":"66.666667%","1/4":"25%","2/4":"50%","3/4":"75%","1/5":"20%","2/5":"40%","3/5":"60%","4/5":"80%","1/6":"16.666667%","2/6":"33.333333%","3/6":"50%","4/6":"66.666667%","5/6":"83.333333%",full:"100%",screen:"100vh",svh:"100svh",lvh:"100lvh",dvh:"100dvh",min:"min-content",max:"max-content",fit:"fit-content"}),hueRotate:{0:"0deg",15:"15deg",30:"30deg",60:"60deg",90:"90deg",180:"180deg"},inset:({theme:t})=>({auto:"auto",...t("spacing"),"1/2":"50%","1/3":"33.333333%","2/3":"66.666667%","1/4":"25%","2/4":"50%","3/4":"75%",full:"100%"}),invert:{0:"0",DEFAULT:"100%"},keyframes:{spin:{to:{transform:"rotate(360deg)"}},ping:{"75%, 100%":{transform:"scale(2)",opacity:"0"}},pulse:{"50%":{opacity:".5"}},bounce:{"0%, 100%":{transform:"translateY(-25%)",animationTimingFunction:"cubic-bezier(0.8,0,1,1)"},"50%":{transform:"none",animationTimingFunction:"cubic-bezier(0,0,0.2,1)"}}},letterSpacing:{tighter:"-0.05em",tight:"-0.025em",normal:"0em",wide:"0.025em",wider:"0.05em",widest:"0.1em"},lineHeight:{none:"1",tight:"1.25",snug:"1.375",normal:"1.5",relaxed:"1.625",loose:"2",3:".75rem",4:"1rem",5:"1.25rem",6:"1.5rem",7:"1.75rem",8:"2rem",9:"2.25rem",10:"2.5rem"},listStyleType:{none:"none",disc:"disc",decimal:"decimal"},listStyleImage:{none:"none"},margin:({theme:t})=>({auto:"auto",...t("spacing")}),lineClamp:{1:"1",2:"2",3:"3",4:"4",5:"5",6:"6"},maxHeight:({theme:t})=>({...t("spacing"),none:"none",full:"100%",screen:"100vh",svh:"100svh",lvh:"100lvh",dvh:"100dvh",min:"min-content",max:"max-content",fit:"fit-content"}),maxWidth:({theme:t,breakpoints:e})=>({...t("spacing"),none:"none",xs:"20rem",sm:"24rem",md:"28rem",lg:"32rem",xl:"36rem","2xl":"42rem","3xl":"48rem","4xl":"56rem","5xl":"64rem","6xl":"72rem","7xl":"80rem",full:"100%",min:"min-content",max:"max-content",fit:"fit-content",prose:"65ch",...e(t("screens"))}),minHeight:({theme:t})=>({...t("spacing"),full:"100%",screen:"100vh",svh:"100svh",lvh:"100lvh",dvh:"100dvh",min:"min-content",max:"max-content",fit:"fit-content"}),minWidth:({theme:t})=>({...t("spacing"),full:"100%",min:"min-content",max:"max-content",fit:"fit-content"}),objectPosition:{bottom:"bottom",center:"center",left:"left","left-bottom":"left bottom","left-top":"left top",right:"right","right-bottom":"right bottom","right-top":"right top",top:"top"},opacity:{0:"0",5:"0.05",10:"0.1",15:"0.15",20:"0.2",25:"0.25",30:"0.3",35:"0.35",40:"0.4",45:"0.45",50:"0.5",55:"0.55",60:"0.6",65:"0.65",70:"0.7",75:"0.75",80:"0.8",85:"0.85",90:"0.9",95:"0.95",100:"1"},order:{first:"-9999",last:"9999",none:"0",1:"1",2:"2",3:"3",4:"4",5:"5",6:"6",7:"7",8:"8",9:"9",10:"10",11:"11",12:"12"},outlineColor:({theme:t})=>t("colors"),outlineOffset:{0:"0px",1:"1px",2:"2px",4:"4px",8:"8px"},outlineWidth:{0:"0px",1:"1px",2:"2px",4:"4px",8:"8px"},padding:({theme:t})=>t("spacing"),placeholderColor:({theme:t})=>t("colors"),placeholderOpacity:({theme:t})=>t("opacity"),ringColor:({theme:t})=>({DEFAULT:t("colors.blue.500","#3b82f6"),...t("colors")}),ringOffsetColor:({theme:t})=>t("colors"),ringOffsetWidth:{0:"0px",1:"1px",2:"2px",4:"4px",8:"8px"},ringOpacity:({theme:t})=>({DEFAULT:"0.5",...t("opacity")}),ringWidth:{DEFAULT:"3px",0:"0px",1:"1px",2:"2px",4:"4px",8:"8px"},rotate:{0:"0deg",1:"1deg",2:"2deg",3:"3deg",6:"6deg",12:"12deg",45:"45deg",90:"90deg",180:"180deg"},saturate:{0:"0",50:".5",100:"1",150:"1.5",200:"2"},scale:{0:"0",50:".5",75:".75",90:".9",95:".95",100:"1",105:"1.05",110:"1.1",125:"1.25",150:"1.5"},screens:{sm:"640px",md:"768px",lg:"1024px",xl:"1280px","2xl":"1536px"},scrollMargin:({theme:t})=>({...t("spacing")}),scrollPadding:({theme:t})=>t("spacing"),sepia:{0:"0",DEFAULT:"100%"},skew:{0:"0deg",1:"1deg",2:"2deg",3:"3deg",6:"6deg",12:"12deg"},space:({theme:t})=>({...t("spacing")}),spacing:{px:"1px",0:"0px",.5:"0.125rem",1:"0.25rem",1.5:"0.375rem",2:"0.5rem",2.5:"0.625rem",3:"0.75rem",3.5:"0.875rem",4:"1rem",5:"1.25rem",6:"1.5rem",7:"1.75rem",8:"2rem",9:"2.25rem",10:"2.5rem",11:"2.75rem",12:"3rem",14:"3.5rem",16:"4rem",20:"5rem",24:"6rem",28:"7rem",32:"8rem",36:"9rem",40:"10rem",44:"11rem",48:"12rem",52:"13rem",56:"14rem",60:"15rem",64:"16rem",72:"18rem",80:"20rem",96:"24rem"},stroke:({theme:t})=>({none:"none",...t("colors")}),strokeWidth:{0:"0",1:"1",2:"2"},supports:{},data:{},textColor:({theme:t})=>t("colors"),textDecorationColor:({theme:t})=>t("colors"),textDecorationThickness:{auto:"auto","from-font":"from-font",0:"0px",1:"1px",2:"2px",4:"4px",8:"8px"},textIndent:({theme:t})=>({...t("spacing")}),textOpacity:({theme:t})=>t("opacity"),textUnderlineOffset:{auto:"auto",0:"0px",1:"1px",2:"2px",4:"4px",8:"8px"},transformOrigin:{center:"center",top:"top","top-right":"top right",right:"right","bottom-right":"bottom right",bottom:"bottom","bottom-left":"bottom left",left:"left","top-left":"top left"},transitionDelay:{0:"0s",75:"75ms",100:"100ms",150:"150ms",200:"200ms",300:"300ms",500:"500ms",700:"700ms",1e3:"1000ms"},transitionDuration:{DEFAULT:"150ms",0:"0s",75:"75ms",100:"100ms",150:"150ms",200:"200ms",300:"300ms",500:"500ms",700:"700ms",1e3:"1000ms"},transitionProperty:{none:"none",all:"all",DEFAULT:"color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter",colors:"color, background-color, border-color, text-decoration-color, fill, stroke",opacity:"opacity",shadow:"box-shadow",transform:"transform"},transitionTimingFunction:{DEFAULT:"cubic-bezier(0.4, 0, 0.2, 1)",linear:"linear",in:"cubic-bezier(0.4, 0, 1, 1)",out:"cubic-bezier(0, 0, 0.2, 1)","in-out":"cubic-bezier(0.4, 0, 0.2, 1)"},translate:({theme:t})=>({...t("spacing"),"1/2":"50%","1/3":"33.333333%","2/3":"66.666667%","1/4":"25%","2/4":"50%","3/4":"75%",full:"100%"}),size:({theme:t})=>({auto:"auto",...t("spacing"),"1/2":"50%","1/3":"33.333333%","2/3":"66.666667%","1/4":"25%","2/4":"50%","3/4":"75%","1/5":"20%","2/5":"40%","3/5":"60%","4/5":"80%","1/6":"16.666667%","2/6":"33.333333%","3/6":"50%","4/6":"66.666667%","5/6":"83.333333%","1/12":"8.333333%","2/12":"16.666667%","3/12":"25%","4/12":"33.333333%","5/12":"41.666667%","6/12":"50%","7/12":"58.333333%","8/12":"66.666667%","9/12":"75%","10/12":"83.333333%","11/12":"91.666667%",full:"100%",min:"min-content",max:"max-content",fit:"fit-content"}),width:({theme:t})=>({auto:"auto",...t("spacing"),"1/2":"50%","1/3":"33.333333%","2/3":"66.666667%","1/4":"25%","2/4":"50%","3/4":"75%","1/5":"20%","2/5":"40%","3/5":"60%","4/5":"80%","1/6":"16.666667%","2/6":"33.333333%","3/6":"50%","4/6":"66.666667%","5/6":"83.333333%","1/12":"8.333333%","2/12":"16.666667%","3/12":"25%","4/12":"33.333333%","5/12":"41.666667%","6/12":"50%","7/12":"58.333333%","8/12":"66.666667%","9/12":"75%","10/12":"83.333333%","11/12":"91.666667%",full:"100%",screen:"100vw",svw:"100svw",lvw:"100lvw",dvw:"100dvw",min:"min-content",max:"max-content",fit:"fit-content"}),willChange:{auto:"auto",scroll:"scroll-position",contents:"contents",transform:"transform"},zIndex:{auto:"auto",0:"0",10:"10",20:"20",30:"30",40:"40",50:"50"}},plugins:[]}});function bn(t){let e=(t?.presets??[Hc.default]).slice().reverse().flatMap(n=>bn(n instanceof Function?n():n)),r={respectDefaultRingColorOpacity:{theme:{ringColor:({theme:n})=>({DEFAULT:"#3b82f67f",...n("colors")})}},disableColorOpacityUtilitiesByDefault:{corePlugins:{backgroundOpacity:!1,borderOpacity:!1,divideOpacity:!1,placeholderOpacity:!1,ringOpacity:!1,textOpacity:!1}}},i=Object.keys(r).filter(n=>we(t,n)).map(n=>r[n]);return[t,...i,...e]}var Hc,Wc=_(()=>{u();Hc=pe(Vc());ht()});function xn(...t){let[,...e]=bn(t[0]);return Ea([...t,...e])}var Gc=_(()=>{u();jc();Wc()});var Jr={};Qe(Jr,{default:()=>ge});var ge,tt=_(()=>{u();ge={resolve:t=>t,extname:t=>"."+t.split(".").pop()}});function wn(t){return typeof t=="object"&&t!==null}function Qv(t){return Object.keys(t).length===0}function Yc(t){return typeof t=="string"||t instanceof String}function _a(t){return wn(t)&&t.config===void 0&&!Qv(t)?null:wn(t)&&t.config!==void 0&&Yc(t.config)?ge.resolve(t.config):wn(t)&&t.config!==void 0&&wn(t.config)?null:Yc(t)?ge.resolve(t):Kv()}function Kv(){for(let t of Yv)try{let e=ge.resolve(t);return xe.accessSync(e),e}catch(e){}return null}var Yv,Qc=_(()=>{u();dt();tt();Yv=["./tailwind.config.js","./tailwind.config.cjs","./tailwind.config.mjs","./tailwind.config.ts","./tailwind.config.cts","./tailwind.config.mts"]});var Kc={};Qe(Kc,{default:()=>Oa});var Oa,Ta=_(()=>{u();Oa={parse:t=>({href:t})}});var Ra=v(()=>{u()});var vn=v((PP,Zc)=>{u();"use strict";var Xc=(ir(),uc),Jc=Ra(),or=class extends Error{constructor(e,r,i,n,s,a){super(e);this.name="CssSyntaxError",this.reason=e,s&&(this.file=s),n&&(this.source=n),a&&(this.plugin=a),typeof r!="undefined"&&typeof i!="undefined"&&(typeof r=="number"?(this.line=r,this.column=i):(this.line=r.line,this.column=r.column,this.endLine=i.line,this.endColumn=i.column)),this.setMessage(),Error.captureStackTrace&&Error.captureStackTrace(this,or)}setMessage(){this.message=this.plugin?this.plugin+": ":"",this.message+=this.file?this.file:"<css input>",typeof this.line!="undefined"&&(this.message+=":"+this.line+":"+this.column),this.message+=": "+this.reason}showSourceCode(e){if(!this.source)return"";let r=this.source;e==null&&(e=Xc.isColorSupported);let i=f=>f,n=f=>f,s=f=>f;if(e){let{bold:f,gray:d,red:p}=Xc.createColors(!0);n=m=>f(p(m)),i=m=>d(m),Jc&&(s=m=>Jc(m))}let a=r.split(/\r?\n/),o=Math.max(this.line-3,0),l=Math.min(this.line+2,a.length),c=String(l).length;return a.slice(o,l).map((f,d)=>{let p=o+1+d,m=" "+(" "+p).slice(-c)+" | ";if(p===this.line){if(f.length>160){let w=20,y=Math.max(0,this.column-w),x=Math.max(this.column+w,this.endColumn+w),k=f.slice(y,x),S=i(m.replace(/\d/g," "))+f.slice(0,Math.min(this.column-1,w-1)).replace(/[^\t]/g," ");return n(">")+i(m)+s(k)+`
  `+S+n("^")}let b=i(m.replace(/\d/g," "))+f.slice(0,this.column-1).replace(/[^\t]/g," ");return n(">")+i(m)+s(f)+`
@@ -5850,6 +5977,51 @@ function EvidenceWorkspace({
   }, "Open ", activeProject.code)));
 }
 const WS_NAV = [['home', 'Home'], ['projects', 'Projects'], ['evidence', 'Evidence'], ['reviews', 'Reviews'], ['handoffs', 'Handoffs'], ['discover', 'Discover']];
+const WS_ANALYSIS = [['map', 'Map', 'map'], ['risk', 'Continuity risk', 'risk'], ['shelf', 'The Shelf', 'shelf'], ['extract', 'Shelve a project', 'extract']];
+const WS_DEMO = [{
+  who: 'okonkwo',
+  section: 'home',
+  role: 'Faculty',
+  title: 'The group director opens the week',
+  body: 'Three projects, what each one is waiting on, and how much of the record is actually approved rather than sitting in drafts.'
+}, {
+  who: 'yusuf',
+  section: 'reviews',
+  role: 'PhD mentor',
+  title: 'The PhD mentor clears the review queue',
+  body: 'Undergraduates write the record; the mentor signs it off. Nothing reaches an incoming student until a second reader has agreed it is true.'
+}, {
+  who: 'priya',
+  section: 'evidence',
+  role: 'Outgoing undergraduate',
+  title: 'The student who is leaving writes it down',
+  body: 'Priya graduates in December. Evidence she adds now becomes the opening pages of the next student\u2019s brief \u2014 anything she does not write leaves with her.'
+}, {
+  who: 'priya',
+  section: 'handoffs',
+  role: 'Outgoing undergraduate',
+  title: 'Her project is packaged as a handoff',
+  body: 'The packet assembles itself from approved entries only. Drafts and pending items are labelled or excluded rather than quietly included.'
+}, {
+  who: 'tobias',
+  section: 'handoffs',
+  role: 'Incoming undergraduate',
+  title: 'The new student arrives to a written project',
+  body: 'Tobias starts in September on a project that is already two years old. He begins from what worked, what failed, and where to pick up \u2014 not a blank page.'
+}, {
+  who: 'tobias',
+  section: 'discover',
+  role: 'Incoming undergraduate',
+  title: 'And can see what else is available',
+  body: 'Shelved work that a graduate student stopped, with the reason it stopped stated plainly. That is where the next project comes from.'
+}];
+const WS_TIER = {
+  ug: 'Undergraduate',
+  phd: 'PhD student',
+  pi: 'Faculty',
+  alum: 'Alum',
+  partner: 'Partner'
+};
 const WS_PROJECT_TABS = [['overview', 'Overview'], ['research', 'Research'], ['record', 'Record'], ['evidence', 'Evidence'], ['people', 'People'], ['settings', 'Settings']];
 const WS_RECORD_TYPES = ['decision', 'method', 'result', 'deadend', 'blocker', 'next'];
 const WS_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -5912,6 +6084,87 @@ function wsRecordSummary(projects) {
     activity
   };
 }
+function WsIdentityPicker({
+  me,
+  identities,
+  onSelect
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = e => {
+      if (box.current && !box.current.contains(e.target)) setOpen(false);
+    };
+    const esc = e => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+  const groups = [];
+  identities.forEach(person => {
+    const tier = WS_TIER[person.tier] || 'Other';
+    const found = groups.find(group => group.tier === tier);
+    if (found) found.people.push(person);else groups.push({
+      tier,
+      people: [person]
+    });
+  });
+  return React.createElement("div", {
+    className: "ws-identity",
+    ref: box
+  }, React.createElement("div", {
+    className: "ws-nav-label"
+  }, "Viewing as"), React.createElement("button", {
+    type: "button",
+    className: "ws-identity-trigger",
+    "aria-haspopup": "listbox",
+    "aria-expanded": open,
+    onClick: () => setOpen(o => !o)
+  }, React.createElement("span", {
+    className: "ws-avatar",
+    "aria-hidden": "true"
+  }, me.i), React.createElement("span", {
+    className: "ws-identity-copy"
+  }, React.createElement("strong", null, me.n), React.createElement("span", {
+    className: "ws-identity-tier",
+    "data-tier": me.tier
+  }, WS_TIER[me.tier] || 'Member')), React.createElement("span", {
+    className: "ws-identity-caret",
+    "aria-hidden": "true"
+  }, "\u25be")), open && React.createElement("div", {
+    className: "ws-identity-menu",
+    role: "listbox",
+    "aria-label": "Demo identity"
+  }, groups.map(group => React.createElement("div", {
+    key: group.tier,
+    className: "ws-identity-group"
+  }, React.createElement("div", {
+    className: "ws-identity-grouphead"
+  }, group.tier), group.people.map(person => React.createElement("button", {
+    type: "button",
+    role: "option",
+    "aria-selected": person.k === me.k,
+    key: person.k,
+    className: 'ws-identity-option' + (person.k === me.k ? ' is-active' : ''),
+    onClick: () => {
+      onSelect(person);
+      setOpen(false);
+    }
+  }, React.createElement("span", {
+    className: "ws-avatar",
+    "aria-hidden": "true"
+  }, person.i), React.createElement("span", {
+    className: "ws-identity-copy"
+  }, React.createElement("strong", null, person.n), React.createElement("span", {
+    className: "ws-meta"
+  }, person.line))))))));
+}
 function WsIcon({
   name
 }) {
@@ -5961,6 +6214,42 @@ function WsIcon({
       r: "9"
     }), React.createElement("path", {
       d: "m15.5 8.5-2 5-5 2 2-5z"
+    })),
+    map: React.createElement(React.Fragment, null, React.createElement("circle", {
+      cx: "6",
+      cy: "7",
+      r: "2.4"
+    }), React.createElement("circle", {
+      cx: "18",
+      cy: "6",
+      r: "2.4"
+    }), React.createElement("circle", {
+      cx: "12",
+      cy: "17",
+      r: "2.4"
+    }), React.createElement("path", {
+      d: "M7.9 8.4 10.6 15M16.4 7.8 13.6 15M8.2 6.6h7.4"
+    })),
+    risk: React.createElement(React.Fragment, null, React.createElement("path", {
+      d: "M12 3.5 21 19H3z"
+    }), React.createElement("path", {
+      d: "M12 10v4M12 16.6v.2"
+    })),
+    shelf: React.createElement(React.Fragment, null, React.createElement("rect", {
+      x: "3.5",
+      y: "4.5",
+      width: "17",
+      height: "6"
+    }), React.createElement("rect", {
+      x: "3.5",
+      y: "13.5",
+      width: "17",
+      height: "6"
+    })),
+    extract: React.createElement(React.Fragment, null, React.createElement("path", {
+      d: "M12 3.5v11M8.4 11l3.6 3.6 3.6-3.6"
+    }), React.createElement("path", {
+      d: "M4.5 16.5v3h15v-3"
     }))
   };
   return React.createElement("svg", {
@@ -6122,13 +6411,78 @@ function WsPageHead({
     className: "ws-actions"
   }, actions));
 }
+function WsHeroMap({
+  me,
+  projects
+}) {
+  const mine = (projects || []).filter(project => (me.projects || []).includes(project.id) || (project.log || []).some(entry => authorsOf(entry).some(person => person.k === me.k)));
+  const others = [];
+  mine.forEach(project => (project.log || []).forEach(entry => authorsOf(entry).forEach(person => {
+    if (person.k !== me.k && !others.some(other => other.k === person.k)) others.push(person);
+  })));
+  const cx = 140,
+    cy = 95;
+  const ring = mine.slice(0, 4).map((project, i, all) => {
+    const angle = -Math.PI / 2 + i / Math.max(1, all.length) * Math.PI * 2;
+    return {
+      x: cx + Math.cos(angle) * 60,
+      y: cy + Math.sin(angle) * 50
+    };
+  });
+  const outer = others.slice(0, 7).map((person, i, all) => {
+    const angle = -Math.PI / 2 + (i + 0.5) / Math.max(1, all.length) * Math.PI * 2;
+    return {
+      x: cx + Math.cos(angle) * 112,
+      y: cy + Math.sin(angle) * 76
+    };
+  });
+  const nearest = point => ring.reduce((best, node) => {
+    const d = Math.hypot(node.x - point.x, node.y - point.y);
+    return !best || d < best.d ? {
+      node,
+      d
+    } : best;
+  }, null);
+  return React.createElement("svg", {
+    viewBox: "0 0 280 190",
+    fill: "none",
+    focusable: "false",
+    role: "img",
+    "aria-label": 'Your position in the record: ' + pl(mine.length, 'project', 'projects') + ', ' + pl(others.length, 'person', 'people') + ' you share a record with'
+  }, outer.map((point, i) => {
+    const hit = nearest(point);
+    return hit ? React.createElement("path", {
+      key: 'o' + i,
+      d: 'M' + point.x + ' ' + point.y + 'L' + hit.node.x + ' ' + hit.node.y
+    }) : null;
+  }), ring.map((point, i) => React.createElement("path", {
+    key: 'r' + i,
+    d: 'M' + cx + ' ' + cy + 'L' + point.x + ' ' + point.y
+  })), outer.map((point, i) => React.createElement("circle", {
+    key: 'c' + i,
+    cx: point.x,
+    cy: point.y,
+    r: "4"
+  })), ring.map((point, i) => React.createElement("circle", {
+    key: 'p' + i,
+    cx: point.x,
+    cy: point.y,
+    r: "7.5"
+  })), React.createElement("circle", {
+    cx: cx,
+    cy: cy,
+    r: "11.5",
+    className: "ws-hero-you"
+  }));
+}
 function WsHero({
   eyebrow,
   title,
   subtitle,
   actions,
   metadata,
-  metrics
+  metrics,
+  art
 }) {
   return React.createElement("header", {
     className: "ws-hero"
@@ -6147,53 +6501,8 @@ function WsHero({
   }, actions), metrics && React.createElement("div", {
     className: "ws-hero-metrics"
   }, metrics)), React.createElement("div", {
-    className: "ws-hero-art",
-    "aria-hidden": "true"
-  }, React.createElement("svg", {
-    viewBox: "0 0 280 190",
-    fill: "none",
-    focusable: "false"
-  }, React.createElement("path", {
-    d: "M27 145C74 110 104 132 137 95S201 42 255 55"
-  }), React.createElement("path", {
-    d: "M45 52h74M70 78h104M126 120h108"
-  }), React.createElement("circle", {
-    cx: "27",
-    cy: "145",
-    r: "8"
-  }), React.createElement("circle", {
-    cx: "137",
-    cy: "95",
-    r: "11"
-  }), React.createElement("circle", {
-    cx: "255",
-    cy: "55",
-    r: "8"
-  }), React.createElement("circle", {
-    cx: "45",
-    cy: "52",
-    r: "5"
-  }), React.createElement("circle", {
-    cx: "119",
-    cy: "52",
-    r: "5"
-  }), React.createElement("circle", {
-    cx: "70",
-    cy: "78",
-    r: "5"
-  }), React.createElement("circle", {
-    cx: "174",
-    cy: "78",
-    r: "5"
-  }), React.createElement("circle", {
-    cx: "126",
-    cy: "120",
-    r: "5"
-  }), React.createElement("circle", {
-    cx: "234",
-    cy: "120",
-    r: "5"
-  }))));
+    className: "ws-hero-art"
+  }, art));
 }
 function WsRecordVisual({
   projects
@@ -6552,9 +6861,136 @@ function WsProjectSettings({
     onClick: () => onOpenLegacy('project', project.id)
   }, "Open original project")));
 }
+function wsInline(text, keyPrefix) {
+  const out = [];
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g;
+  let last = 0,
+    match,
+    i = 0;
+  while (match = pattern.exec(text)) {
+    if (match.index > last) out.push(text.slice(last, match.index));
+    const token = match[0];
+    const key = keyPrefix + '-' + i++;
+    if (token.startsWith('**')) out.push(React.createElement("strong", {
+      key: key
+    }, token.slice(2, -2)));else if (token.startsWith('`')) out.push(React.createElement("code", {
+      key: key
+    }, token.slice(1, -1)));else out.push(React.createElement("em", {
+      key: key
+    }, token.slice(1, -1)));
+    last = match.index + token.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+function WsMarkdown({
+  source
+}) {
+  const blocks = [];
+  const lines = String(source || '').split(/\r?\n/);
+  let list = null,
+    para = [];
+  const flushPara = () => {
+    if (para.length) {
+      blocks.push({
+        kind: 'p',
+        text: para.join(' ')
+      });
+      para = [];
+    }
+  };
+  const flushList = () => {
+    if (list) {
+      blocks.push({
+        kind: 'ul',
+        items: list
+      });
+      list = null;
+    }
+  };
+  lines.forEach(raw => {
+    const line = raw.replace(/\s+$/, '');
+    if (!line.trim()) {
+      flushPara();
+      flushList();
+      return;
+    }
+    const heading = /^(#{1,4})\s+(.*)$/.exec(line);
+    if (heading) {
+      flushPara();
+      flushList();
+      blocks.push({
+        kind: 'h' + heading[1].length,
+        text: heading[2]
+      });
+      return;
+    }
+    if (/^(-{3,}|\*{3,})$/.test(line.trim())) {
+      flushPara();
+      flushList();
+      blocks.push({
+        kind: 'hr'
+      });
+      return;
+    }
+    const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
+    if (bullet) {
+      flushPara();
+      list = list || [];
+      list.push(bullet[1]);
+      return;
+    }
+    const quote = /^>\s?(.*)$/.exec(line);
+    if (quote) {
+      flushPara();
+      flushList();
+      blocks.push({
+        kind: 'quote',
+        text: quote[1]
+      });
+      return;
+    }
+    flushList();
+    para.push(line.trim());
+  });
+  flushPara();
+  flushList();
+  return React.createElement("div", {
+    className: "ws-md"
+  }, blocks.map((block, i) => {
+    const key = 'b' + i;
+    if (block.kind === 'hr') return React.createElement("hr", {
+      key: key
+    });
+    if (block.kind === 'ul') return React.createElement("ul", {
+      key: key
+    }, block.items.map((item, j) => React.createElement("li", {
+      key: j
+    }, wsInline(item, key + '-' + j))));
+    if (block.kind === 'quote') return React.createElement("blockquote", {
+      key: key
+    }, wsInline(block.text, key));
+    if (block.kind === 'h1') return React.createElement("h1", {
+      key: key
+    }, wsInline(block.text, key));
+    if (block.kind === 'h2') return React.createElement("h2", {
+      key: key
+    }, wsInline(block.text, key));
+    if (block.kind === 'h3') return React.createElement("h3", {
+      key: key
+    }, wsInline(block.text, key));
+    if (block.kind === 'h4') return React.createElement("h4", {
+      key: key
+    }, wsInline(block.text, key));
+    return React.createElement("p", {
+      key: key
+    }, wsInline(block.text, key));
+  }));
+}
 function WsHandoff({
   project
 }) {
+  const [showSource, setShowSource] = useState(false);
   const [copyState, setCopyState] = useState('');
   const markdown = useMemo(() => wsMarkdown(project), [project]);
   const approved = (project.log || []).filter(e => e.ack !== false);
@@ -6617,11 +7053,29 @@ function WsHandoff({
     className: "ws-panel"
   }, React.createElement("div", {
     className: "ws-panel-head"
-  }, React.createElement("h2", null, "Markdown packet preview"), React.createElement("span", {
+  }, React.createElement("h2", null, "Handoff packet"), React.createElement("div", {
+    className: "ws-inline"
+  }, React.createElement("span", {
     className: "ws-meta"
-  }, "Pending items labeled; drafts excluded")), React.createElement("pre", {
+  }, "Pending items labeled; drafts excluded"), React.createElement("div", {
+    className: "ws-toggle",
+    role: "group",
+    "aria-label": "Packet view"
+  }, React.createElement("button", {
+    type: "button",
+    className: 'ws-toggle-item' + (!showSource ? ' is-active' : ''),
+    "aria-pressed": !showSource,
+    onClick: () => setShowSource(false)
+  }, "Formatted"), React.createElement("button", {
+    type: "button",
+    className: 'ws-toggle-item' + (showSource ? ' is-active' : ''),
+    "aria-pressed": showSource,
+    onClick: () => setShowSource(true)
+  }, "Markdown")))), showSource ? React.createElement("pre", {
     className: "ws-source-body"
-  }, markdown)));
+  }, markdown) : React.createElement(WsMarkdown, {
+    source: markdown
+  })));
 }
 function WsHome({
   projects,
@@ -6645,7 +7099,11 @@ function WsHome({
       className: "ws-button ws-button-primary",
       onClick: () => onAddEvidence(projects[0].id)
     }, "Add evidence"),
-    metrics: React.createElement(React.Fragment, null, React.createElement("div", null, React.createElement("strong", null, projects.length), React.createElement("span", null, "Accessible projects")), React.createElement("div", null, React.createElement("strong", null, recordedNext), React.createElement("span", null, "Recorded next steps")), React.createElement("div", null, React.createElement("strong", null, handoffs.length), React.createElement("span", null, "Handoffs pending")))
+    metrics: React.createElement(React.Fragment, null, React.createElement("div", null, React.createElement("strong", null, projects.length), React.createElement("span", null, "Accessible projects")), React.createElement("div", null, React.createElement("strong", null, recordedNext), React.createElement("span", null, "Recorded next steps")), React.createElement("div", null, React.createElement("strong", null, handoffs.length), React.createElement("span", null, "Handoffs pending"))),
+    art: React.createElement(WsHeroMap, {
+      me: me,
+      projects: projects
+    })
   }), React.createElement("div", {
     className: "ws-grid ws-grid-two ws-home-overview"
   }, React.createElement("section", {
@@ -6783,6 +7241,9 @@ function ResearchWorkspace({
   const [projectTab, setProjectTab] = useState(initial.projectTab || 'overview');
   const [query, setQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [demo, setDemo] = useState(null);
+  const demoRef = useRef(null);
+  const [demoPlaying, setDemoPlaying] = useState(true);
   const identityRef = useRef(me.k);
   const selectedProject = accessibleProjects.find(project => project.id === selectedProjectId) || accessibleProjects[0] || null;
   const identities = PEOPLE.filter(person => person.tier !== 'partner');
@@ -6790,7 +7251,7 @@ function ResearchWorkspace({
     if (identityRef.current === me.k) return;
     identityRef.current = me.k;
     const saved = wsReadState(me.k);
-    setSection(saved.section || 'home');
+    setSection(demoRef.current !== null ? WS_DEMO[demoRef.current].section : saved.section || 'home');
     setSelectedProjectId(saved.selectedProjectId || ((projects || []).find(project => me.scope === 'all' || (me.projects || []).includes(project.id)) || {}).id || '');
     setProjectTab(saved.projectTab || 'overview');
     setQuery('');
@@ -6808,6 +7269,37 @@ function ResearchWorkspace({
       }));
     } catch (_) {}
   }, [section, selectedProjectId, projectTab, me.k]);
+  function runDemo(index) {
+    if (index === null || index >= WS_DEMO.length) {
+      demoRef.current = null;
+      setDemo(null);
+      return;
+    }
+    const stop = WS_DEMO[index];
+    demoRef.current = index;
+    setDemo(index);
+    const person = byKey(stop.who);
+    if (person && person.k !== me.k && onIdentityChange) onIdentityChange(person);
+    setSection(stop.section);
+    setMenuOpen(false);
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({
+      top: 0,
+      behavior: reduceMotion ? 'auto' : 'smooth'
+    });
+  }
+  useEffect(() => {
+    if (demo === null || !demoPlaying) return;
+    const timer = setTimeout(() => {
+      if (demo + 1 >= WS_DEMO.length) {
+        demoRef.current = null;
+        setDemo(null);
+        return;
+      }
+      runDemo(demo + 1);
+    }, 9000);
+    return () => clearTimeout(timer);
+  }, [demo, demoPlaying]);
   function navigate(nextSection) {
     setSection(nextSection);
     setMenuOpen(false);
@@ -6873,6 +7365,15 @@ function ResearchWorkspace({
     onClick: () => navigate(key)
   }, React.createElement(WsIcon, {
     name: key
+  }), React.createElement("span", null, label))), React.createElement("div", {
+    className: "ws-nav-label"
+  }, "Analysis"), WS_ANALYSIS.map(([key, label, icon]) => React.createElement("button", {
+    type: "button",
+    key: key,
+    className: "ws-nav-item",
+    onClick: () => safeOpenLegacy(key)
+  }, React.createElement(WsIcon, {
+    name: icon
   }), React.createElement("span", null, label))), accessibleProjects.length > 0 && React.createElement(React.Fragment, null, React.createElement("div", {
     className: "ws-nav-label"
   }, "Projects"), accessibleProjects.map(project => React.createElement("button", {
@@ -6882,30 +7383,70 @@ function ResearchWorkspace({
     onClick: () => openProject(project.id)
   }, React.createElement("span", null, project.name), React.createElement("small", null, project.code))))), React.createElement("div", {
     className: "ws-sidebar-foot"
-  }, React.createElement("label", {
-    className: "ws-field ws-demo"
-  }, React.createElement("span", null, "Demo identity"), React.createElement("select", {
-    className: "ws-select",
-    value: me.k,
-    onChange: e => {
-      const person = byKey(e.target.value);
-      if (person && onIdentityChange) onIdentityChange(person);
+  }, React.createElement(WsIdentityPicker, {
+    me: me,
+    identities: identities,
+    onSelect: person => onIdentityChange && onIdentityChange(person)
+  }), React.createElement("button", {
+    type: "button",
+    className: "ws-button ws-button-quiet ws-demo-start",
+    onClick: () => {
+      setDemoPlaying(true);
+      runDemo(0);
     }
-  }, identities.map(person => React.createElement("option", {
-    value: person.k,
-    key: person.k
-  }, person.n)))), React.createElement("div", {
-    className: "ws-inline"
-  }, React.createElement("span", {
-    className: "ws-avatar",
-    "aria-hidden": "true"
-  }, me.i), React.createElement("div", null, React.createElement("strong", null, me.n), React.createElement("div", {
-    className: "ws-meta"
-  }, me.line))), React.createElement("button", {
+  }, "Play guided demo"), React.createElement("button", {
     type: "button",
     className: "ws-link",
     onClick: () => safeOpenLegacy('register')
-  }, "Original prototype"))), React.createElement("div", {
+  }, "Original prototype"))), demo !== null && React.createElement("div", {
+    className: "ws-demobar",
+    role: "region",
+    "aria-label": "Guided demo"
+  }, React.createElement("div", {
+    className: "ws-demobar-steps",
+    "aria-hidden": "true"
+  }, WS_DEMO.map((_, i) => React.createElement("button", {
+    type: "button",
+    key: i,
+    className: 'ws-demobar-dot' + (i === demo ? ' is-active' : i < demo ? ' is-done' : ''),
+    onClick: () => {
+      setDemoPlaying(false);
+      runDemo(i);
+    },
+    tabIndex: -1
+  }))), React.createElement("div", {
+    className: "ws-demobar-copy"
+  }, React.createElement("div", {
+    className: "ws-demobar-meta"
+  }, WS_DEMO[demo].role, " \u00b7 stop ", demo + 1, " of ", WS_DEMO.length), React.createElement("strong", null, WS_DEMO[demo].title), React.createElement("p", null, WS_DEMO[demo].body)), React.createElement("div", {
+    className: "ws-demobar-controls"
+  }, React.createElement("button", {
+    type: "button",
+    className: "ws-button ws-button-quiet",
+    onClick: () => setDemoPlaying(p => !p)
+  }, demoPlaying ? 'Pause' : 'Play'), React.createElement("button", {
+    type: "button",
+    className: "ws-button ws-button-quiet",
+    disabled: demo === 0,
+    onClick: () => {
+      setDemoPlaying(false);
+      runDemo(demo - 1);
+    }
+  }, "Back"), React.createElement("button", {
+    type: "button",
+    className: "ws-button ws-button-primary",
+    onClick: () => {
+      setDemoPlaying(false);
+      runDemo(demo + 1);
+    }
+  }, demo + 1 >= WS_DEMO.length ? 'Finish' : 'Next'), React.createElement("button", {
+    type: "button",
+    className: "ws-link",
+    onClick: () => {
+      demoRef.current = null;
+      setDemo(null);
+    }
+  }, "Exit"))), React.createElement("div", {
     className: "ws-main"
   }, React.createElement("header", {
     className: "ws-topbar"
