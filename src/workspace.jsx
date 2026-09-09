@@ -10,6 +10,38 @@ const WS_NAV = [
   ['discover', 'Discover'],
 ];
 
+const WS_ANALYSIS = [
+  ['map', 'Map', 'map'],
+  ['risk', 'Continuity risk', 'risk'],
+  ['shelf', 'The Shelf', 'shelf'],
+  ['extract', 'Shelve a project', 'extract'],
+];
+
+const WS_DEMO = [
+  { who:'okonkwo', section:'home', role:'Faculty',
+    title:'The group director opens the week',
+    body:'Three projects, what each one is waiting on, and how much of the record is actually approved rather than sitting in drafts.' },
+  { who:'yusuf', section:'reviews', role:'PhD mentor',
+    title:'The PhD mentor clears the review queue',
+    body:'Undergraduates write the record; the mentor signs it off. Nothing reaches an incoming student until a second reader has agreed it is true.' },
+  { who:'priya', section:'evidence', role:'Outgoing undergraduate',
+    title:'The student who is leaving writes it down',
+    body:'Priya graduates in December. Evidence she adds now becomes the opening pages of the next student’s brief — anything she does not write leaves with her.' },
+  { who:'priya', section:'handoffs', role:'Outgoing undergraduate',
+    title:'Her project is packaged as a handoff',
+    body:'The packet assembles itself from approved entries only. Drafts and pending items are labelled or excluded rather than quietly included.' },
+  { who:'tobias', section:'handoffs', role:'Incoming undergraduate',
+    title:'The new student arrives to a written project',
+    body:'Tobias starts in September on a project that is already two years old. He begins from what worked, what failed, and where to pick up — not a blank page.' },
+  { who:'tobias', section:'discover', role:'Incoming undergraduate',
+    title:'And can see what else is available',
+    body:'Shelved work that a graduate student stopped, with the reason it stopped stated plainly. That is where the next project comes from.' },
+];
+
+const WS_TIER = {
+  ug:'Undergraduate', phd:'PhD student', pi:'Faculty', alum:'Alum', partner:'Partner',
+};
+
 const WS_PROJECT_TABS = [
   ['overview', 'Overview'],
   ['research', 'Research'],
@@ -70,6 +102,55 @@ function wsRecordSummary(projects){
   return { approvedTotal:entries.length, typeCounts, latestDate:latest.value, periodLabel, activity };
 }
 
+function WsIdentityPicker({ me, identities, onSelect }){
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = e => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    const esc = e => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  const groups = [];
+  identities.forEach(person => {
+    const tier = WS_TIER[person.tier] || 'Other';
+    const found = groups.find(group => group.tier === tier);
+    if (found) found.people.push(person); else groups.push({ tier, people:[person] });
+  });
+  return (
+    <div className="ws-identity" ref={box}>
+      <div className="ws-nav-label">Viewing as</div>
+      <button type="button" className="ws-identity-trigger" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        <span className="ws-avatar" aria-hidden="true">{me.i}</span>
+        <span className="ws-identity-copy">
+          <strong>{me.n}</strong>
+          <span className="ws-identity-tier" data-tier={me.tier}>{WS_TIER[me.tier] || 'Member'}</span>
+        </span>
+        <span className="ws-identity-caret" aria-hidden="true">&#9662;</span>
+      </button>
+      {open && (
+        <div className="ws-identity-menu" role="listbox" aria-label="Demo identity">
+          {groups.map(group => (
+            <div key={group.tier} className="ws-identity-group">
+              <div className="ws-identity-grouphead">{group.tier}</div>
+              {group.people.map(person => (
+                <button type="button" role="option" aria-selected={person.k === me.k} key={person.k}
+                  className={'ws-identity-option' + (person.k === me.k ? ' is-active' : '')}
+                  onClick={() => { onSelect(person); setOpen(false); }}>
+                  <span className="ws-avatar" aria-hidden="true">{person.i}</span>
+                  <span className="ws-identity-copy"><strong>{person.n}</strong><span className="ws-meta">{person.line}</span></span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WsIcon({ name }){
   const shapes = {
     home:<><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-7h5v7"/></>,
@@ -78,6 +159,10 @@ function WsIcon({ name }){
     reviews:<><path d="M9 4h6l1 2h3v15H5V6h3z"/><path d="m8.5 13 2 2 5-5"/></>,
     handoffs:<><path d="M4 7h12"/><path d="m12 3 4 4-4 4"/><path d="M20 17H8"/><path d="m12 13-4 4 4 4"/></>,
     discover:<><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></>,
+    map:<><circle cx="6" cy="7" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="12" cy="17" r="2.4"/><path d="M7.9 8.4 10.6 15M16.4 7.8 13.6 15M8.2 6.6h7.4"/></>,
+    risk:<><path d="M12 3.5 21 19H3z"/><path d="M12 10v4M12 16.6v.2"/></>,
+    shelf:<><rect x="3.5" y="4.5" width="17" height="6"/><rect x="3.5" y="13.5" width="17" height="6"/></>,
+    extract:<><path d="M12 3.5v11M8.4 11l3.6 3.6 3.6-3.6"/><path d="M4.5 16.5v3h15v-3"/></>,
   };
   return <svg className="ws-nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{shapes[name]}</svg>;
 }
@@ -237,7 +322,45 @@ function WsPageHead({ eyebrow, title, subtitle, actions }){
   );
 }
 
-function WsHero({ eyebrow, title, subtitle, actions, metadata, metrics }){
+/* The banner used to hold a decorative squiggle shaped like the map but meaning
+   nothing. In a product about evidence, an ornament shaped like data is the wrong
+   ornament -- so it is now drawn from the reader's own position: them at the
+   centre, their projects around them, and the people they share a record with. */
+function WsHeroMap({ me, projects }){
+  const mine = (projects || []).filter(project =>
+    ((me.projects || []).includes(project.id)) ||
+    (project.log || []).some(entry => authorsOf(entry).some(person => person.k === me.k)));
+  const others = [];
+  mine.forEach(project => (project.log || []).forEach(entry => authorsOf(entry).forEach(person => {
+    if (person.k !== me.k && !others.some(other => other.k === person.k)) others.push(person);
+  })));
+  const cx = 140, cy = 95;
+  const ring = mine.slice(0, 4).map((project, i, all) => {
+    const angle = -Math.PI / 2 + (i / Math.max(1, all.length)) * Math.PI * 2;
+    return { x: cx + Math.cos(angle) * 60, y: cy + Math.sin(angle) * 50 };
+  });
+  const outer = others.slice(0, 7).map((person, i, all) => {
+    const angle = -Math.PI / 2 + ((i + 0.5) / Math.max(1, all.length)) * Math.PI * 2;
+    return { x: cx + Math.cos(angle) * 112, y: cy + Math.sin(angle) * 76 };
+  });
+  const nearest = point => ring.reduce((best, node) => {
+    const d = Math.hypot(node.x - point.x, node.y - point.y);
+    return !best || d < best.d ? { node, d } : best;
+  }, null);
+  return (
+    <svg viewBox="0 0 280 190" fill="none" focusable="false" role="img"
+         aria-label={'Your position in the record: ' + pl(mine.length,'project','projects') + ', ' + pl(others.length,'person','people') + ' you share a record with'}>
+      {outer.map((point, i) => { const hit = nearest(point); return hit
+        ? <path key={'o' + i} d={'M' + point.x + ' ' + point.y + 'L' + hit.node.x + ' ' + hit.node.y} /> : null; })}
+      {ring.map((point, i) => <path key={'r' + i} d={'M' + cx + ' ' + cy + 'L' + point.x + ' ' + point.y} />)}
+      {outer.map((point, i) => <circle key={'c' + i} cx={point.x} cy={point.y} r="4" />)}
+      {ring.map((point, i) => <circle key={'p' + i} cx={point.x} cy={point.y} r="7.5" />)}
+      <circle cx={cx} cy={cy} r="11.5" className="ws-hero-you" />
+    </svg>
+  );
+}
+
+function WsHero({ eyebrow, title, subtitle, actions, metadata, metrics, art }){
   return (
     <header className="ws-hero">
       <div className="ws-hero-copy">
@@ -248,21 +371,7 @@ function WsHero({ eyebrow, title, subtitle, actions, metadata, metrics }){
         {actions && <div className="ws-actions">{actions}</div>}
         {metrics && <div className="ws-hero-metrics">{metrics}</div>}
       </div>
-      <div className="ws-hero-art" aria-hidden="true">
-        <svg viewBox="0 0 280 190" fill="none" focusable="false">
-          <path d="M27 145C74 110 104 132 137 95S201 42 255 55" />
-          <path d="M45 52h74M70 78h104M126 120h108" />
-          <circle cx="27" cy="145" r="8" />
-          <circle cx="137" cy="95" r="11" />
-          <circle cx="255" cy="55" r="8" />
-          <circle cx="45" cy="52" r="5" />
-          <circle cx="119" cy="52" r="5" />
-          <circle cx="70" cy="78" r="5" />
-          <circle cx="174" cy="78" r="5" />
-          <circle cx="126" cy="120" r="5" />
-          <circle cx="234" cy="120" r="5" />
-        </svg>
-      </div>
+      <div className="ws-hero-art">{art}</div>
     </header>
   );
 }
@@ -325,11 +434,12 @@ function WsProjectPicker({ projects, selectedId, onSelect, label }){
   );
 }
 
-function WsWorkspaceTabs({ section, onNavigate }){
+function WsWorkspaceTabs({ section, onNavigate, onOpenLegacy }){
   const activeKey = wsWorkspaceNavKey(section);
   return (
     <nav className="ws-workspace-tabs" aria-label="Workspace sections">
       {WS_NAV.map(([key, label]) => <button type="button" key={key} className={'ws-tab' + (activeKey === key ? ' is-active' : '')} aria-current={activeKey === key ? 'page' : undefined} onClick={() => onNavigate(key)}>{label}</button>)}
+      {WS_ANALYSIS.filter(item => item[0] === 'risk' || item[0] === 'extract').map(([key, label]) => <button type="button" key={key} className="ws-tab" onClick={() => onOpenLegacy(key)}>{label}</button>)}
     </nav>
   );
 }
@@ -346,18 +456,19 @@ function WsProjectContext({ project, projectTab, onTab, onProjects }){
   );
 }
 
-function WsHeader({ section, project, projectTab, projects, me, identities, onNavigate, onProject, onTab, onIdentity, onOpenLegacy }){
+function WsHeader({ section, project, projectTab, projects, me, identities, onNavigate, onProject, onTab, onIdentity, onOpenLegacy, onPlayDemo }){
   return (
     <header className="ws-shell-header">
       <div className="ws-header-row">
         <button type="button" className="ws-brand ws-brand-horizontal" onClick={() => onNavigate('home')} aria-label="URI workspace home"><span>URI</span><small>Research workspace</small></button>
         <div className="ws-header-controls">
           <WsProjectPicker projects={projects} selectedId={project ? project.id : ''} onSelect={onProject} label="Current project" />
-          <label className="ws-field ws-identity-picker"><span>Viewing as</span><select className="ws-select" value={me.k} onChange={event => onIdentity(event.target.value)}>{identities.map(person => <option value={person.k} key={person.k}>{person.n}</option>)}</select></label>
+          <WsIdentityPicker me={me} identities={identities} onSelect={person => onIdentity(person.k)} />
+          <button type="button" className="ws-button ws-button-quiet ws-demo-header" onClick={onPlayDemo}>Guided demo</button>
           <button type="button" className="ws-link ws-original-link" onClick={() => onOpenLegacy('register')}>Original prototype</button>
         </div>
       </div>
-      <WsWorkspaceTabs section={section} onNavigate={onNavigate} />
+      <WsWorkspaceTabs section={section} onNavigate={onNavigate} onOpenLegacy={onOpenLegacy} />
       {section === 'project' && <WsProjectContext project={project} projectTab={projectTab} onTab={onTab} onProjects={() => onNavigate('projects')} />}
     </header>
   );
@@ -382,6 +493,7 @@ function WsProjectHome({ project, me, people, onAddEvidence, onOpenHandoff, onTa
         metadata={<><WsBadge>{wsIsStashed(project) ? 'Stashed' : project.status === 'handoff' ? 'Handoff pending' : 'Active'}</WsBadge><span>PI / advisor: {advisor}</span><span>Student lead: {studentLead}</span><span>{wsIsStashed(project) && project.stashVisibility === 'lab' ? 'Shared with lab' : 'Private workspace'}</span></>}
         actions={wsIsStashed(project) ? <><button type="button" className="ws-button ws-button-quiet" onClick={onOpenMap}>Open source map</button><button type="button" className="ws-button ws-button-primary" onClick={onOpenHandoff}>Export archive</button></> : <><button type="button" className="ws-button ws-button-quiet" onClick={onOpenMap}>View connections</button><button type="button" className="ws-button ws-button-primary" onClick={onAddEvidence}>Add evidence</button></>}
         metrics={<><div><strong>{summary.approvedTotal}</strong><span>Approved entries</span></div><div><strong>{approvedNext}</strong><span>Recorded next steps</span></div><div><strong>{summary.latestDate || 'None'}</strong><span>Latest dated update</span></div></>}
+        art={<WsHeroMap me={me} projects={[project]} />}
       />
       <ResearchProjectSummary key={me.k + ':' + project.id} project={project} me={me} onOpen={() => onTab('research')} />
       <div className="ws-grid ws-grid-two ws-overview-split">
@@ -573,7 +685,65 @@ function WsProjectSettings({ project, me, onOpenLegacy, onStash, onResume, onSet
   );
 }
 
+/* A small Markdown renderer for the subset the export actually produces.
+   Builds React elements rather than setting innerHTML, so nothing in a record
+   can inject markup into the page. */
+function wsInline(text, keyPrefix){
+  const out = [];
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g;
+  let last = 0, match, i = 0;
+  while ((match = pattern.exec(text))) {
+    if (match.index > last) out.push(text.slice(last, match.index));
+    const token = match[0];
+    const key = keyPrefix + '-' + (i++);
+    if (token.startsWith('**')) out.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+    else if (token.startsWith('`')) out.push(<code key={key}>{token.slice(1, -1)}</code>);
+    else out.push(<em key={key}>{token.slice(1, -1)}</em>);
+    last = match.index + token.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+function WsMarkdown({ source }){
+  const blocks = [];
+  const lines = String(source || '').split(/\r?\n/);
+  let list = null, para = [];
+  const flushPara = () => { if (para.length) { blocks.push({ kind:'p', text:para.join(' ') }); para = []; } };
+  const flushList = () => { if (list) { blocks.push({ kind:'ul', items:list }); list = null; } };
+  lines.forEach(raw => {
+    const line = raw.replace(/\s+$/, '');
+    if (!line.trim()) { flushPara(); flushList(); return; }
+    const heading = /^(#{1,4})\s+(.*)$/.exec(line);
+    if (heading) { flushPara(); flushList(); blocks.push({ kind:'h' + heading[1].length, text:heading[2] }); return; }
+    if (/^(-{3,}|\*{3,})$/.test(line.trim())) { flushPara(); flushList(); blocks.push({ kind:'hr' }); return; }
+    const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
+    if (bullet) { flushPara(); list = list || []; list.push(bullet[1]); return; }
+    const quote = /^>\s?(.*)$/.exec(line);
+    if (quote) { flushPara(); flushList(); blocks.push({ kind:'quote', text:quote[1] }); return; }
+    flushList();
+    para.push(line.trim());
+  });
+  flushPara(); flushList();
+  return (
+    <div className="ws-md">
+      {blocks.map((block, i) => {
+        const key = 'b' + i;
+        if (block.kind === 'hr') return <hr key={key} />;
+        if (block.kind === 'ul') return <ul key={key}>{block.items.map((item, j) => <li key={j}>{wsInline(item, key + '-' + j)}</li>)}</ul>;
+        if (block.kind === 'quote') return <blockquote key={key}>{wsInline(block.text, key)}</blockquote>;
+        if (block.kind === 'h1') return <h1 key={key}>{wsInline(block.text, key)}</h1>;
+        if (block.kind === 'h2') return <h2 key={key}>{wsInline(block.text, key)}</h2>;
+        if (block.kind === 'h3') return <h3 key={key}>{wsInline(block.text, key)}</h3>;
+        if (block.kind === 'h4') return <h4 key={key}>{wsInline(block.text, key)}</h4>;
+        return <p key={key}>{wsInline(block.text, key)}</p>;
+      })}
+    </div>
+  );
+}
+
 function WsHandoff({ project }){
+  const [showSource, setShowSource] = useState(false);
   const [copyState, setCopyState] = useState('');
   const markdown = useMemo(() => wsMarkdown(project), [project]);
   const approved = (project.log || []).filter(e => e.ack !== false);
@@ -625,8 +795,19 @@ function WsHandoff({ project }){
         </div>
       </section>
       <section className="ws-panel">
-        <div className="ws-panel-head"><h2>Markdown packet preview</h2><span className="ws-meta">Pending items labeled; drafts excluded</span></div>
-        <pre className="ws-source-body">{markdown}</pre>
+        <div className="ws-panel-head">
+          <h2>Handoff packet</h2>
+          <div className="ws-inline">
+            <span className="ws-meta">Pending items labeled; drafts excluded</span>
+            <div className="ws-toggle" role="group" aria-label="Packet view">
+              <button type="button" className={'ws-toggle-item' + (!showSource ? ' is-active' : '')}
+                aria-pressed={!showSource} onClick={() => setShowSource(false)}>Formatted</button>
+              <button type="button" className={'ws-toggle-item' + (showSource ? ' is-active' : '')}
+                aria-pressed={showSource} onClick={() => setShowSource(true)}>Markdown</button>
+            </div>
+          </div>
+        </div>
+        {showSource ? <pre className="ws-source-body">{markdown}</pre> : <WsMarkdown source={markdown} />}
       </section>
     </>
   );
@@ -645,6 +826,7 @@ function WsHome({ projects, me, onOpenProject, onAddEvidence }){
         subtitle="See where your accessible projects stand and continue the next recorded action."
         actions={projects[0] && <button type="button" className="ws-button ws-button-primary" onClick={() => onAddEvidence(projects[0].id)}>Add evidence</button>}
         metrics={<><div><strong>{projects.length}</strong><span>Accessible projects</span></div><div><strong>{recordedNext}</strong><span>Recorded next steps</span></div><div><strong>{handoffs.length}</strong><span>Handoffs pending</span></div></>}
+        art={<WsHeroMap me={me} projects={projects} />}
       />
       <div className="ws-grid ws-grid-two ws-home-overview">
         <section className="ws-panel">
@@ -821,6 +1003,9 @@ function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, s
   const [projectTab, setProjectTab] = useState(initial.projectTab || 'overview');
   const [query, setQuery] = useState('');
   const [mapScope, setMapScope] = useState('all');
+  const [demo, setDemo] = useState(null);
+  const demoRef = useRef(null);
+  const [demoPlaying, setDemoPlaying] = useState(true);
   const identityRef = useRef(me.k);
   const selectedProject = accessibleProjects.find(project => project.id === selectedProjectId) || accessibleProjects.find(project => project.id === firstId) || null;
   const identities = PEOPLE.filter(person => person.tier !== 'partner');
@@ -829,7 +1014,7 @@ function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, s
     if (identityRef.current === me.k) return;
     identityRef.current = me.k;
     const saved = wsReadState(me.k);
-    setSection(saved.section || 'home');
+    setSection(demoRef.current !== null ? WS_DEMO[demoRef.current].section : (saved.section || 'home'));
     const nextProjects = (projects || []).filter(project => me.scope === 'all' || (me.projects || []).includes(project.id));
     const nextBuckets = wsProjectBuckets(nextProjects);
     setSelectedProjectId(saved.selectedProjectId || ((nextBuckets.active[0] || nextProjects[0]) || {}).id || '');
@@ -852,6 +1037,27 @@ function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, s
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
   }, [section, selectedProjectId, projectTab]);
+
+  /* the demo drives the same controls a person would, so nothing is faked */
+  function runDemo(index){
+    if (index === null || index >= WS_DEMO.length) { demoRef.current = null; setDemo(null); return; }
+    const stop = WS_DEMO[index];
+    demoRef.current = index;
+    setDemo(index);
+    const person = byKey(stop.who);
+    if (person && person.k !== me.k && onIdentityChange) onIdentityChange(person);
+    setSection(stop.section);
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top:0, behavior:reduceMotion ? 'auto' : 'smooth' });
+  }
+  useEffect(() => {
+    if (demo === null || !demoPlaying) return;
+    const timer = setTimeout(() => {
+      if (demo + 1 >= WS_DEMO.length) { demoRef.current = null; setDemo(null); return; }
+      runDemo(demo + 1);
+    }, 9000);
+    return () => clearTimeout(timer);
+  }, [demo, demoPlaying]);
 
   function navigate(nextSection){
     setSection(nextSection);
@@ -912,7 +1118,25 @@ function ResearchWorkspace({ projects, me, onIdentityChange, onPublishEntries, s
   return (
     <div className="ws-app">
       <a className="skip" href="#workspace-main">Skip to workspace content</a>
-      <WsHeader section={section} project={selectedProject} projectTab={projectTab} projects={accessibleProjects} me={me} identities={identities} onNavigate={key => key === 'map' ? openMap() : navigate(key)} onProject={selectProject} onTab={setProjectTab} onIdentity={key => { const person = byKey(key); if (person && onIdentityChange) onIdentityChange(person); }} onOpenLegacy={safeOpenLegacy} />
+      <WsHeader section={section} project={selectedProject} projectTab={projectTab} projects={accessibleProjects} me={me} identities={identities} onNavigate={key => key === 'map' ? openMap() : navigate(key)} onProject={selectProject} onTab={setProjectTab} onIdentity={key => { const person = byKey(key); if (person && onIdentityChange) onIdentityChange(person); }} onOpenLegacy={safeOpenLegacy} onPlayDemo={() => { setDemoPlaying(true); runDemo(0); }} />
+      {demo !== null && (
+        <div className="ws-demobar" role="region" aria-label="Guided demo">
+          <div className="ws-demobar-steps" aria-hidden="true">
+            {WS_DEMO.map((_, i) => <button type="button" key={i} className={'ws-demobar-dot' + (i === demo ? ' is-active' : i < demo ? ' is-done' : '')} onClick={() => { setDemoPlaying(false); runDemo(i); }} tabIndex={-1} />)}
+          </div>
+          <div className="ws-demobar-copy">
+            <div className="ws-demobar-meta">{WS_DEMO[demo].role} &middot; stop {demo + 1} of {WS_DEMO.length}</div>
+            <strong>{WS_DEMO[demo].title}</strong>
+            <p>{WS_DEMO[demo].body}</p>
+          </div>
+          <div className="ws-demobar-controls">
+            <button type="button" className="ws-button ws-button-quiet" onClick={() => setDemoPlaying(p => !p)}>{demoPlaying ? 'Pause' : 'Play'}</button>
+            <button type="button" className="ws-button ws-button-quiet" disabled={demo === 0} onClick={() => { setDemoPlaying(false); runDemo(demo - 1); }}>Back</button>
+            <button type="button" className="ws-button ws-button-primary" onClick={() => { setDemoPlaying(false); runDemo(demo + 1); }}>{demo + 1 >= WS_DEMO.length ? 'Finish' : 'Next'}</button>
+            <button type="button" className="ws-link" onClick={() => { demoRef.current = null; setDemo(null); }}>Exit</button>
+          </div>
+        </div>
+      )}
       <main id="workspace-main" className="ws-content">
           {section === 'home' && <WsHome projects={projectBuckets.active} me={me} onOpenProject={openProject} onAddEvidence={openEvidence} />}
           {section === 'projects' && <WsProjects projects={accessibleProjects} query={query} setQuery={setQuery} onOpenProject={openProject} />}
