@@ -149,7 +149,10 @@ async def post_git_source(
             project_id=project_id,
             family="git",
             external_id=str(inventory.repository_root),
-            native_version=f"git:{command.start_commit}:{command.end_commit}:{inventory.resolved_head_sha}",
+            native_version=(
+                f"git:{inventory.commits[0].sha}:{inventory.commits[-1].sha}:"
+                f"{inventory.resolved_head_sha}"
+            ),
             media_type=GIT_MANIFEST_MEDIA_TYPE,
             title=command.title or inventory.repository_root.name,
             metadata={

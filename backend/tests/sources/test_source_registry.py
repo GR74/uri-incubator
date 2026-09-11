@@ -298,3 +298,29 @@ async def test_git_preview_is_authorized_and_does_not_persist(
     assert response.json()["resolved_head_sha"] == sha
     assert response.json()["allowed_file_count"] == 1
     assert before == after == b""
+
+
+async def test_git_registration_persists_an_immutable_manifest(
+    client: httpx.AsyncClient, source_fixture: SourceFixture, tmp_path: Path
+) -> None:
+    root = tmp_path / "synthetic-git"
+    sha = create_synthetic_git_repository(root)
+
+    response = await client.post(
+        f"/api/projects/{source_fixture.project_id}/sources/git",
+        headers={"X-URI-User-ID": str(source_fixture.actor_id)},
+        json={
+            "repository_root": str(root.resolve()),
+            "ref_name": "refs/heads/pilot",
+            "start_commit": sha,
+            "end_commit": sha,
+            "include_paths": ["methods.md"],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["family"] == "git"
+    artifacts = list((tmp_path / "artifacts").rglob("*"))
+    manifest = next(path for path in artifacts if path.is_file()).read_text(encoding="ascii")
+    assert '"resolved_head_sha"' in manifest
+    assert "synthetic methods" in manifest
