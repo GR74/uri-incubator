@@ -18,6 +18,9 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.scripts]
+uri-worker = "uri_backend.ingestion.worker:main"
+
 [dependency-groups]
 dev = [
   "httpx>=0.27,<1.0",

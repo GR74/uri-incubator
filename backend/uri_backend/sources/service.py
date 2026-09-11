@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from uri_backend.ingestion.queue import enqueue_ingestion
 from uri_backend.projects.models import AuditEvent, Project, User
 from uri_backend.projects.service import Capability, require_capability
 from uri_backend.sources.artifacts import StoredArtifact
@@ -112,4 +113,5 @@ async def register_source_version(
             )
     version = await session.get(SourceVersion, version_id)
     assert version is not None
+    await enqueue_ingestion(session, version.id, "normalization-v1")
     return version
