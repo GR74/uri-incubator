@@ -46,6 +46,7 @@ def test_dataset_manifest_contains_reference_not_raw_rows() -> None:
     result = ManifestAdapter().normalize(_input("manifests/dataset.yaml", "reference_manifest", "application/yaml"))
 
     assert result.parts[0].metadata["accession"] == "synthetic-accession"
+    assert result.parts[0].locator == {"accession": "synthetic-accession"}
     assert all("participant_id" not in part.text for part in result.parts)
 
 
@@ -60,6 +61,39 @@ def test_manifest_rejects_participant_row_like_data(tmp_path: Path) -> None:
     assert result.parts == []
     assert [warning.code for warning in result.warnings] == ["participant_data_disallowed"]
     assert "do-not-store" not in result.warnings[0].message
+
+
+def test_manifest_rejects_common_participant_table_variants_without_echoing_rows(tmp_path: Path) -> None:
+    """Identifier and demographic variants must not bypass the manifest privacy boundary."""
+    artifact = tmp_path / "unsafe-variants.json"
+    artifact.write_text(
+        '{"rows":[{"person_code":"private-row","age_years":19,"measure":-2.5},'
+        '{"subject":"private-row-two","trial":2,"score":0}]}',
+        encoding="utf-8",
+    )
+
+    result = ManifestAdapter().normalize(
+        AdapterInput(artifact_path=artifact, family="reference_manifest", media_type="application/json")
+    )
+
+    assert result.status == "failed"
+    assert result.parts == []
+    assert [warning.code for warning in result.warnings] == ["participant_data_disallowed"]
+    assert "private-row" not in result.warnings[0].message
+
+
+def test_manifest_keeps_aggregate_cohort_summary_and_uses_fallback_locator(tmp_path: Path) -> None:
+    """Aggregate cohort metadata is allowed and must not be mistaken for participant rows."""
+    aggregate = tmp_path / "aggregate.json"
+    aggregate.write_text('{"cohort_summary":{"n":20,"mean_age":24.5},"license":"CC0"}', encoding="utf-8")
+
+    result = ManifestAdapter().normalize(
+        AdapterInput(artifact_path=aggregate, family="reference_manifest", media_type="application/json")
+    )
+
+    assert result.status == "normalized"
+    assert result.parts[0].locator == {"manifest": 1}
+    assert result.parts[0].metadata["cohort_summary"] == {"n": 20, "mean_age": 24.5}
 
 
 def test_bibtex_preserves_citation_key_and_fields() -> None:
@@ -95,6 +129,50 @@ def test_protocol_steps_are_individually_addressable() -> None:
     result = LabNotebookAdapter().normalize(_input("lab_notebooks/protocol.html", "lab_notebook", "text/html"))
 
     assert [part.locator["step"] for part in result.parts if part.kind == "protocol_step"] == [1, 2]
+
+
+def test_eln_csv_maps_known_fields_and_preserves_uncategorized_notes(tmp_path: Path) -> None:
+    """Opaque CSV JSON loses the addressable ELN fields reviewers need to inspect."""
+    artifact = tmp_path / "entry.csv"
+    artifact.write_text(
+        "entry_id,title,section,observation,attachments,deviations,protocol_step,notes\n"
+        "csv-1,Synthetic CSV,Preparation,Observed zero,raw.txt,None,Measure twice,Uncategorized provenance\n",
+        encoding="utf-8",
+    )
+
+    result = LabNotebookAdapter().normalize(
+        AdapterInput(artifact_path=artifact, family="lab_notebook", media_type="text/csv")
+    )
+
+    assert [(part.kind, part.locator) for part in result.parts] == [
+        ("entry_section", {"entry": "csv-1", "section": 1}),
+        ("observation", {"entry": "csv-1", "observation": 1}),
+        ("attachment", {"entry": "csv-1", "attachment": 1}),
+        ("deviation", {"entry": "csv-1", "deviation": 1}),
+        ("protocol_step", {"entry": "csv-1", "step": 1}),
+        ("observation", {"entry": "csv-1", "observation": 2}),
+    ]
+    assert result.parts[0].metadata["attachments"] == ["raw.txt"]
+    assert result.parts[0].metadata["deviations"] == ["None"]
+    assert result.parts[-1].text == "Uncategorized provenance"
+
+
+def test_eln_text_formats_keep_prose_with_headings_and_steps(tmp_path: Path) -> None:
+    """Dropping prose whenever structural markup exists erases the lab-record evidence."""
+    markdown = tmp_path / "entry.md"
+    markdown.write_text("# Preparation\nKept prose observation.\n1. Measure synthetic signal.\n", encoding="utf-8")
+    html = tmp_path / "entry.html"
+    html.write_text("<h1>Preparation</h1><p>Kept HTML prose.</p><ol><li>Measure synthetic signal.</li></ol>", encoding="utf-8")
+
+    markdown_result = LabNotebookAdapter().normalize(
+        AdapterInput(artifact_path=markdown, family="lab_notebook", media_type="text/markdown")
+    )
+    html_result = LabNotebookAdapter().normalize(
+        AdapterInput(artifact_path=html, family="lab_notebook", media_type="text/html")
+    )
+
+    assert "Kept prose observation." in [part.text for part in markdown_result.parts]
+    assert "Kept HTML prose." in [part.text for part in html_result.parts]
 
 
 def test_malformed_adapter_input_has_a_safe_parse_error(tmp_path: Path) -> None:

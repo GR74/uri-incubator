@@ -6,6 +6,7 @@ import csv
 import json
 import re
 from html import unescape
+from html.parser import HTMLParser
 from typing import Any
 
 from pypdf import PdfReader
@@ -67,21 +68,66 @@ class LabNotebookAdapter:
     def _csv(self, text: str) -> NormalizationResult:
         rows = list(csv.DictReader(text.splitlines()))
         if len(rows) > MAX_ROWS: return self._failed("row_limit_exceeded", "ELN CSV exceeds the row limit.")
-        parts = [NormalizedPart(ordinal=index, kind="entry_row", text=json.dumps(row, ensure_ascii=True, sort_keys=True), locator={"row": index}, metadata={"signatures_verified": False}) for index, row in enumerate(rows, start=1)]
+        parts: list[NormalizedPart] = []
+        counters: dict[str, dict[str, int]] = {}
+        for row_number, row in enumerate(rows, start=1):
+            entry_id = row.get("entry_id") or row.get("record_id") or row.get("id") or str(row_number)
+            common = self._entry_metadata(row)
+            entry_counters = counters.setdefault(
+                entry_id,
+                {"section": 0, "observation": 0, "step": 0, "attachment": 0, "deviation": 0},
+            )
+            for field, value in row.items():
+                if not value or field in {"entry_id", "record_id", "id", "title", "created_at", "updated_at", "signatures", "signature"}:
+                    continue
+                kind, locator_key = self._csv_kind(field)
+                entry_counters[locator_key] += 1
+                metadata = {**common, "field": field} if kind == "observation" else common
+                parts.append(NormalizedPart(ordinal=len(parts) + 1, kind=kind, text=value, locator={"entry": entry_id, locator_key: entry_counters[locator_key]}, metadata=metadata))
         return self._result("normalized", parts, [], 1.0 if parts else 0.0)
 
+    def _entry_metadata(self, row: dict[str, str | None]) -> dict[str, Any]:
+        metadata: dict[str, Any] = {"signatures_verified": False}
+        for key in ("title", "created_at", "updated_at"):
+            if row.get(key): metadata[key] = row[key]
+        for singular, plural in (("attachment", "attachments"), ("deviation", "deviations"), ("signature", "signatures")):
+            value = row.get(plural) or row.get(singular)
+            if value: metadata[plural] = [value]
+        return metadata
+
+    def _csv_kind(self, field: str) -> tuple[str, str]:
+        normalized = re.sub(r"[^a-z0-9]+", "_", field.lower()).strip("_")
+        if normalized in {"section", "section_title", "heading"}: return "entry_section", "section"
+        if normalized in {"protocol", "protocol_step", "step", "procedure"}: return "protocol_step", "step"
+        if normalized in {"attachment", "attachments"}: return "attachment", "attachment"
+        if normalized in {"deviation", "deviations"}: return "deviation", "deviation"
+        return "observation", "observation"
+
     def _text(self, text: str, format_name: str) -> NormalizationResult:
-        if format_name == "html":
-            steps = [unescape(re.sub(r"<[^>]+>", "", item)).strip() for item in re.findall(r"<li[^>]*>(.*?)</li>", text, re.IGNORECASE | re.DOTALL)]
-            headings = [unescape(re.sub(r"<[^>]+>", "", item)).strip() for item in re.findall(r"<h[1-6][^>]*>(.*?)</h[1-6]>", text, re.IGNORECASE | re.DOTALL)]
-        else:
-            steps = [match.strip() for match in re.findall(r"(?m)^\s*(?:\d+[.)]|[-*])\s+(.+)$", text)]
-            headings = [match.strip() for match in re.findall(r"(?m)^#{1,6}\s+(.+)$", text)]
+        blocks = self._html_blocks(text) if format_name == "html" else self._markdown_blocks(text)
         parts: list[NormalizedPart] = []
-        for section_number, heading in enumerate(headings, start=1): parts.append(NormalizedPart(ordinal=len(parts)+1, kind="entry_section", text=heading, locator={"section": section_number}, metadata={"format": format_name, "signatures_verified": False}))
-        for step_number, step in enumerate(steps, start=1): parts.append(NormalizedPart(ordinal=len(parts)+1, kind="protocol_step", text=step, locator={"step": step_number}, metadata={"format": format_name, "signatures_verified": False}))
-        if not parts and text.strip(): parts.append(NormalizedPart(ordinal=1, kind="entry_text", text=re.sub(r"<[^>]+>", "", text).strip(), locator={"section": 1}, metadata={"format": format_name, "signatures_verified": False}))
+        counters = {"section": 0, "observation": 0, "step": 0}
+        for kind, block in blocks:
+            locator_key = {"entry_section": "section", "protocol_step": "step", "observation": "observation"}[kind]
+            counters[locator_key] += 1
+            parts.append(NormalizedPart(ordinal=len(parts)+1, kind=kind, text=block, locator={locator_key: counters[locator_key]}, metadata={"format": format_name, "signatures_verified": False}))
         return self._result("normalized", parts, [], 1.0 if parts else 0.0)
+
+    def _markdown_blocks(self, text: str) -> list[tuple[str, str]]:
+        blocks: list[tuple[str, str]] = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped: continue
+            if match := re.fullmatch(r"#{1,6}\s+(.+)", stripped): blocks.append(("entry_section", match.group(1)))
+            elif match := re.fullmatch(r"(?:\d+[.)]|[-*])\s+(.+)", stripped): blocks.append(("protocol_step", match.group(1)))
+            else: blocks.append(("observation", stripped))
+        return blocks
+
+    def _html_blocks(self, text: str) -> list[tuple[str, str]]:
+        parser = _ELNHTMLParser()
+        parser.feed(text)
+        parser.close()
+        return parser.blocks
 
     def _nesting(self, value: Any, depth: int = 0) -> None:
         if depth > MAX_NESTING: raise ValueError("nesting limit")
@@ -92,3 +138,28 @@ class LabNotebookAdapter:
 
     def _failed(self, code: str, message: str) -> NormalizationResult: return self._result("failed", [], [NormalizationWarning(code=code, message=message)], 0.0)
     def _result(self, status: str, parts: list[NormalizedPart], warnings: list[NormalizationWarning], coverage: float) -> NormalizationResult: return NormalizationResult(adapter=self.name, adapter_version=self.version, status=status, parts=parts, warnings=warnings, parse_coverage=coverage)
+
+
+class _ELNHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocks: list[tuple[str, str]] = []
+        self._active: tuple[str, str] | None = None
+        self._text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"p", "li"} or re.fullmatch(r"h[1-6]", tag):
+            self._flush()
+            self._active = (tag, "entry_section" if tag.startswith("h") else "protocol_step" if tag == "li" else "observation")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._active is not None and self._active[0] == tag: self._flush()
+
+    def handle_data(self, data: str) -> None:
+        self._text.append(unescape(data))
+
+    def _flush(self) -> None:
+        text = "".join(self._text).strip()
+        if text: self.blocks.append((self._active[1] if self._active else "observation", text))
+        self._text = []
+        self._active = None
