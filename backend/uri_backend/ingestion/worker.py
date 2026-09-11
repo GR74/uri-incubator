@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from uri_backend.config import Settings
 from uri_backend.database import create_engine, session_factory
-from uri_backend.ingestion.adapters import AdapterRegistry, DocumentAdapter, GitAdapter
+from uri_backend.ingestion.adapters import AdapterRegistry, DocumentAdapter, GitAdapter, LabNotebookAdapter, ManifestAdapter, NotebookAdapter
 from uri_backend.ingestion.contracts import AdapterInput
 from uri_backend.ingestion.models import IngestionRun
 from uri_backend.ingestion.queue import (
@@ -61,7 +61,7 @@ class WorkerConfigurationError(RuntimeError):
 
 
 def default_adapter_registry() -> AdapterRegistry:
-    return AdapterRegistry([DocumentAdapter(), GitAdapter()])
+    return AdapterRegistry([DocumentAdapter(), GitAdapter(), NotebookAdapter(), ManifestAdapter(), LabNotebookAdapter()])
 
 
 def build_normalization_handler(

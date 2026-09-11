@@ -1,0 +1,9 @@
+accession: synthetic-accession
+doi: 10.0000/synthetic
+version: "1.0"
+cohort_summary: fully synthetic summary
+license: CC0-1.0
+loader: synthetic-loader
+checksum: sha256:abc123
+restrictions: no real participant data
+local_availability: true

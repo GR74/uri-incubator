@@ -1,0 +1,8 @@
+{
+  "parameters": {"seed": 7, "threshold": 0.0},
+  "environment": {"python": "3.11", "platform": "synthetic"},
+  "code_revision": "abc123",
+  "dataset_refs": ["synthetic-accession"],
+  "metrics": {"accuracy": 0, "delta": -0.25},
+  "artifact_refs": ["results/synthetic.csv"]
+}
