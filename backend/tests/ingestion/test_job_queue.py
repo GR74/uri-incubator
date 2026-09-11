@@ -21,9 +21,7 @@ from uri_backend.ingestion.queue import (
 )
 from uri_backend.ingestion.worker import (
     PipelineDispatcher,
-    WorkerConfigurationError,
     build_default_dispatcher,
-    run_configured_worker,
     run_worker,
 )
 from uri_backend.projects.models import Project, ProjectMembership, User
@@ -331,13 +329,11 @@ async def test_worker_dispatches_registered_pipeline_then_stops_cleanly(
         assert await session.scalar(sa.select(IngestionJob.status)) == "succeeded"
 
 
-async def test_default_worker_dispatcher_refuses_to_claim_unimplemented_normalization() -> None:
-    """The Task 5 console worker must fail fast before it claims Task 6 normalization jobs."""
+async def test_default_worker_dispatcher_registers_normalization_handler() -> None:
+    """The Task 6 console worker must recognize normalization jobs before polling."""
     dispatcher = build_default_dispatcher()
 
-    assert dispatcher.can_dispatch("normalization-v1") is False
-    with pytest.raises(WorkerConfigurationError):
-        await run_configured_worker(None)  # type: ignore[arg-type]
+    assert dispatcher.can_dispatch("normalization-v1") is True
 
 
 async def test_worker_cancellation_commits_failure_transition(
