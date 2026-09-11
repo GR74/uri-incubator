@@ -96,6 +96,37 @@ def test_manifest_keeps_aggregate_cohort_summary_and_uses_fallback_locator(tmp_p
     assert result.parts[0].metadata["cohort_summary"] == {"n": 20, "mean_age": 24.5}
 
 
+def test_manifest_allows_aggregate_participant_counts_and_distributions(tmp_path: Path) -> None:
+    """Aggregate cohort statistics are not participant rows and must remain ingestible."""
+    aggregate = tmp_path / "aggregate-participant-summary.json"
+    aggregate.write_text(
+        '{"cohort_summary":{"participant_count":20,"mean_age":24.5,'
+        '"sex_distribution":{"female":11,"male":9},"cohort_counts":{"control":10,"test":10}}}',
+        encoding="utf-8",
+    )
+
+    result = ManifestAdapter().normalize(
+        AdapterInput(artifact_path=aggregate, family="reference_manifest", media_type="application/json")
+    )
+
+    assert result.status == "normalized"
+    assert result.parts[0].metadata["cohort_summary"]["participant_count"] == 20
+
+
+def test_manifest_rejects_a_single_row_shaped_participant_record_without_echo(tmp_path: Path) -> None:
+    """A direct participant identifier plus row fields must fail even outside a table container."""
+    artifact = tmp_path / "single-participant-record.json"
+    artifact.write_text('{"participant":"do-not-store","age":19,"score":0}', encoding="utf-8")
+
+    result = ManifestAdapter().normalize(
+        AdapterInput(artifact_path=artifact, family="reference_manifest", media_type="application/json")
+    )
+
+    assert result.status == "failed"
+    assert [warning.code for warning in result.warnings] == ["participant_data_disallowed"]
+    assert "do-not-store" not in result.warnings[0].message
+
+
 def test_bibtex_preserves_citation_key_and_fields() -> None:
     """Replacing a citation key loses the source's stable reference locator."""
     result = ManifestAdapter().normalize(_input("manifests/references.bib", "reference_manifest", "application/x-bibtex"))

@@ -69,10 +69,7 @@ class ManifestAdapter:
     def _participant_rows(self, value: Any, container: str = "") -> bool:
         if isinstance(value, dict):
             fields = {_field_name(key) for key in value}
-            has_person_identifier = any(
-                re.search(r"(?:participant|person|subject|patient)", field)
-                for field in fields
-            )
+            has_person_identifier = any(_is_person_identifier_field(field) for field in fields)
             has_row_measurement = any(
                 re.search(r"(?:age|gender|sex|measure|metric|score|trial|condition|session|response|outcome|value)", field)
                 for field in fields
@@ -101,3 +98,11 @@ class ManifestAdapter:
 
 def _field_name(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value).lower()).strip("_")
+
+
+def _is_person_identifier_field(field: str) -> bool:
+    tokens = field.split("_")
+    person_tokens = {"participant", "person", "subject", "patient"}
+    if field in person_tokens:
+        return True
+    return bool(person_tokens.intersection(tokens)) and tokens[-1] in {"id", "identifier", "code"}
