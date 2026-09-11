@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from uri_backend.config import Settings
 from uri_backend.database import create_engine, session_factory
-from uri_backend.ingestion.adapters import AdapterRegistry, DocumentAdapter
+from uri_backend.ingestion.adapters import AdapterRegistry, DocumentAdapter, GitAdapter
 from uri_backend.ingestion.contracts import AdapterInput
 from uri_backend.ingestion.models import IngestionRun
 from uri_backend.ingestion.queue import (
@@ -47,7 +47,9 @@ class PipelineDispatcher:
     async def dispatch(self, job: ClaimedJob) -> None:
         handler = self._handlers.get(job.pipeline_version)
         if handler is None:
-            raise LookupError(f"No handler registered for pipeline {job.pipeline_version!r}")
+            raise LookupError(
+                f"No handler registered for pipeline {job.pipeline_version!r}"
+            )
         await handler(job)
 
 
@@ -59,7 +61,7 @@ class WorkerConfigurationError(RuntimeError):
 
 
 def default_adapter_registry() -> AdapterRegistry:
-    return AdapterRegistry([DocumentAdapter()])
+    return AdapterRegistry([DocumentAdapter(), GitAdapter()])
 
 
 def build_normalization_handler(
@@ -72,7 +74,9 @@ def build_normalization_handler(
 
     async def handler(job: ClaimedJob) -> None:
         if sessions is None:
-            raise WorkerConfigurationError("Normalization handler requires database sessions")
+            raise WorkerConfigurationError(
+                "Normalization handler requires database sessions"
+            )
         await persist_normalization(
             sessions, job, artifact_root or Settings().artifact_root, adapters
         )
@@ -88,13 +92,15 @@ async def persist_normalization(
 ) -> None:
     """Normalize one claimed artifact and publish its complete part set atomically."""
     async with sessions() as session, session.begin():
-        record = (await session.execute(
-            sa.select(IngestionRun, SourceVersion, Artifact)
-            .join(SourceVersion, IngestionRun.source_version_id == SourceVersion.id)
-            .join(Artifact, SourceVersion.artifact_id == Artifact.id)
-            .where(IngestionRun.id == job.run_id)
-            .with_for_update()
-        )).one_or_none()
+        record = (
+            await session.execute(
+                sa.select(IngestionRun, SourceVersion, Artifact)
+                .join(SourceVersion, IngestionRun.source_version_id == SourceVersion.id)
+                .join(Artifact, SourceVersion.artifact_id == Artifact.id)
+                .where(IngestionRun.id == job.run_id)
+                .with_for_update()
+            )
+        ).one_or_none()
         if record is None:
             raise LookupError(f"Unknown ingestion run {job.run_id}")
         _, version, artifact = record
@@ -153,7 +159,9 @@ def build_default_dispatcher(
 ) -> PipelineDispatcher:
     """Compose installed pipeline handlers."""
     dispatcher = PipelineDispatcher()
-    dispatcher.register("normalization-v1", build_normalization_handler(sessions, artifact_root))
+    dispatcher.register(
+        "normalization-v1", build_normalization_handler(sessions, artifact_root)
+    )
     return dispatcher
 
 
@@ -169,7 +177,9 @@ async def _failure_transition(
     sessions: async_sessionmaker[AsyncSession], job_id, worker_id: str
 ) -> None:
     async with sessions() as session:
-        await fail_job(session, job_id, worker_id, "handler_error", "Worker handler failed")
+        await fail_job(
+            session, job_id, worker_id, "handler_error", "Worker handler failed"
+        )
         await session.commit()
 
 
@@ -182,7 +192,14 @@ async def _await_committed(transition: Awaitable[None]) -> None:
         raise
 
 
-async def run_worker(sessions: async_sessionmaker[AsyncSession], dispatcher: PipelineDispatcher | None = None, *, worker_id: str | None = None, poll_seconds: float = 1.0, lease_seconds: int = 30) -> None:
+async def run_worker(
+    sessions: async_sessionmaker[AsyncSession],
+    dispatcher: PipelineDispatcher | None = None,
+    *,
+    worker_id: str | None = None,
+    poll_seconds: float = 1.0,
+    lease_seconds: int = 30,
+) -> None:
     """Process one committed database transition at a time until cancellation."""
     identity = worker_id or f"{socket.gethostname()}:{os.getpid()}"
     active_dispatcher = dispatcher or DEFAULT_DISPATCHER
@@ -207,7 +224,8 @@ async def run_worker(sessions: async_sessionmaker[AsyncSession], dispatcher: Pip
 
 
 async def run_configured_worker(
-    sessions: async_sessionmaker[AsyncSession], dispatcher: PipelineDispatcher | None = None
+    sessions: async_sessionmaker[AsyncSession],
+    dispatcher: PipelineDispatcher | None = None,
 ) -> None:
     active_dispatcher = dispatcher or build_default_dispatcher(sessions)
     if not active_dispatcher.has_handlers:

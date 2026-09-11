@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from uuid import UUID
 
 from pydantic import BaseModel, Field, JsonValue
@@ -14,6 +15,27 @@ class RegisterSourceVersion(BaseModel):
     media_type: str
     title: str | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class GitSourceCommand(BaseModel):
+    repository_root: Path
+    ref_name: str
+    start_commit: str
+    end_commit: str
+    include_paths: list[str] = Field(min_length=1)
+
+
+class GitRegistrationCommand(GitSourceCommand):
+    title: str | None = None
+
+
+class GitPreviewResponse(BaseModel):
+    resolved_head_sha: str
+    commit_count: int
+    allowed_file_count: int
+    excluded_file_count: int
+    total_allowed_bytes: int
+    exclusions: list[dict[str, str]]
 
 
 class NormalizedPart(BaseModel):

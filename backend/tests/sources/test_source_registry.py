@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -56,8 +57,12 @@ async def source_fixture(db_engine: AsyncEngine) -> SourceFixture:
         await session.flush()
         session.add_all(
             [
-                ProjectMembership(user_id=actor_id, project_id=project_id, role="owner"),
-                ProjectMembership(user_id=actor_id, project_id=stashed_project_id, role="owner"),
+                ProjectMembership(
+                    user_id=actor_id, project_id=project_id, role="owner"
+                ),
+                ProjectMembership(
+                    user_id=actor_id, project_id=stashed_project_id, role="owner"
+                ),
             ]
         )
         await session.commit()
@@ -86,6 +91,35 @@ def artifact() -> StoredArtifact:
         storage_key="11/" + "1" * 62,
         byte_size=14,
     )
+
+
+def git_status(root: Path) -> bytes:
+    return subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain=v1"],
+        check=True,
+        capture_output=True,
+    ).stdout
+
+
+def create_synthetic_git_repository(root: Path) -> str:
+    root.mkdir()
+    for args in (
+        ("init", "--initial-branch=pilot"),
+        ("config", "user.name", "Synthetic"),
+        ("config", "user.email", "synthetic@example.test"),
+    ):
+        subprocess.run(["git", "-C", str(root), *args], check=True)
+    (root / "methods.md").write_text("# synthetic methods\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "methods.md"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "commit", "-m", "Synthetic methods"], check=True
+    )
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
 
 
 async def test_same_source_version_is_idempotent(
@@ -188,9 +222,13 @@ async def test_path_traversal_external_id_never_shapes_artifact_storage(
 
     assert response.status_code == 201
     assert not (tmp_path / "outside.md").exists()
-    stored_files = [path for path in (tmp_path / "artifacts").rglob("*") if path.is_file()]
+    stored_files = [
+        path for path in (tmp_path / "artifacts").rglob("*") if path.is_file()
+    ]
     assert len(stored_files) == 1
-    assert stored_files[0].relative_to(tmp_path / "artifacts").as_posix().count("/") == 1
+    assert (
+        stored_files[0].relative_to(tmp_path / "artifacts").as_posix().count("/") == 1
+    )
 
 
 async def test_cross_project_source_read_returns_not_found(
@@ -234,3 +272,29 @@ async def test_stashed_project_rejects_source_upload(
 
     assert response.status_code == 409
     assert not (tmp_path / "artifacts").exists()
+
+
+async def test_git_preview_is_authorized_and_does_not_persist(
+    client: httpx.AsyncClient, source_fixture: SourceFixture, tmp_path: Path
+) -> None:
+    root = tmp_path / "synthetic-git"
+    sha = create_synthetic_git_repository(root)
+    before = git_status(root)
+
+    response = await client.post(
+        f"/api/projects/{source_fixture.project_id}/sources/git/preview",
+        headers={"X-URI-User-ID": str(source_fixture.actor_id)},
+        json={
+            "repository_root": str(root.resolve()),
+            "ref_name": "refs/heads/pilot",
+            "start_commit": sha,
+            "end_commit": sha,
+            "include_paths": ["methods.md"],
+        },
+    )
+
+    after = git_status(root)
+    assert response.status_code == 200
+    assert response.json()["resolved_head_sha"] == sha
+    assert response.json()["allowed_file_count"] == 1
+    assert before == after == b""
