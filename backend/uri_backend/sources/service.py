@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from uri_backend.projects.models import AuditEvent, Project, User
@@ -33,69 +34,82 @@ async def register_source_version(
 ) -> SourceVersion:
     await require_writable_project(session, actor, command.project_id)
 
-    db_artifact = await session.scalar(
-        sa.select(Artifact).where(Artifact.sha256 == artifact.sha256)
-    )
-    if db_artifact is None:
-        db_artifact = Artifact(
-            sha256=artifact.sha256,
-            storage_key=artifact.storage_key,
-            byte_size=artifact.byte_size,
+    with session.no_autoflush:
+        artifact_id = await session.scalar(
+            pg_insert(Artifact)
+            .values(
+                sha256=artifact.sha256,
+                storage_key=artifact.storage_key,
+                byte_size=artifact.byte_size,
+            )
+            .on_conflict_do_nothing(index_elements=[Artifact.sha256])
+            .returning(Artifact.id)
         )
-        session.add(db_artifact)
-        await session.flush()
+        if artifact_id is None:
+            artifact_id = await session.scalar(
+                sa.select(Artifact.id).where(Artifact.sha256 == artifact.sha256)
+            )
+        assert artifact_id is not None
 
-    existing = await session.scalar(
-        sa.select(SourceVersion).where(
-            SourceVersion.project_id == command.project_id,
-            SourceVersion.family == command.family,
-            SourceVersion.external_id == command.external_id,
-            SourceVersion.native_version == command.native_version,
-            SourceVersion.artifact_id == db_artifact.id,
+        source_id = await session.scalar(
+            pg_insert(Source)
+            .values(
+                project_id=command.project_id,
+                family=command.family,
+                external_id=command.external_id,
+                title=command.title,
+            )
+            .on_conflict_do_nothing(constraint="uq_source_project_identity")
+            .returning(Source.id)
         )
-    )
-    if existing is not None:
-        return existing
+        if source_id is None:
+            source_id = await session.scalar(
+                sa.select(Source.id).where(
+                    Source.project_id == command.project_id,
+                    Source.family == command.family,
+                    Source.external_id == command.external_id,
+                )
+            )
+        assert source_id is not None
 
-    source = await session.scalar(
-        sa.select(Source).where(
-            Source.project_id == command.project_id,
-            Source.family == command.family,
-            Source.external_id == command.external_id,
+        version_id = await session.scalar(
+            pg_insert(SourceVersion)
+            .values(
+                source_id=source_id,
+                project_id=command.project_id,
+                artifact_id=artifact_id,
+                family=command.family,
+                external_id=command.external_id,
+                native_version=command.native_version,
+                media_type=command.media_type,
+                metadata_=command.metadata,
+                created_by=actor.id,
+            )
+            .on_conflict_do_nothing(constraint="uq_source_version_idempotency")
+            .returning(SourceVersion.id)
         )
-    )
-    if source is None:
-        source = Source(
-            project_id=command.project_id,
-            family=command.family,
-            external_id=command.external_id,
-            title=command.title,
-        )
-        session.add(source)
-        await session.flush()
-
-    version = SourceVersion(
-        source_id=source.id,
-        project_id=command.project_id,
-        artifact_id=db_artifact.id,
-        family=command.family,
-        external_id=command.external_id,
-        native_version=command.native_version,
-        media_type=command.media_type,
-        metadata_=command.metadata,
-        created_by=actor.id,
-    )
-    session.add(version)
-    await session.flush()
-    session.add(
-        AuditEvent(
-            actor_id=actor.id,
-            project_id=command.project_id,
-            action="source.version_registered",
-            target_type="source_version",
-            target_id=version.id,
-            metadata_={"source_id": str(source.id), "artifact_id": str(db_artifact.id)},
-        )
-    )
-    await session.flush()
+        if version_id is None:
+            version_id = await session.scalar(
+                sa.select(SourceVersion.id).where(
+                    SourceVersion.project_id == command.project_id,
+                    SourceVersion.family == command.family,
+                    SourceVersion.external_id == command.external_id,
+                    SourceVersion.native_version == command.native_version,
+                    SourceVersion.artifact_id == artifact_id,
+                )
+            )
+            assert version_id is not None
+        else:
+            session.add(
+                AuditEvent(
+                    actor_id=actor.id,
+                    project_id=command.project_id,
+                    action="source.version_registered",
+                    target_type="source_version",
+                    target_id=version_id,
+                    metadata_={"source_id": str(source_id), "artifact_id": str(artifact_id)},
+                )
+            )
+    version = await session.get(SourceVersion, version_id)
+    assert version is not None
     return version

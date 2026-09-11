@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import tempfile
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol
@@ -43,21 +44,57 @@ class LocalArtifactStore:
                     digest.update(chunk)
                     byte_size += len(chunk)
                     staged.write(chunk)
-                staged.flush()
-                os.fsync(staged.fileno())
-            sha256 = digest.hexdigest()
-            storage_key = f"{sha256[:2]}/{sha256[2:]}"
-            destination = self.root / sha256[:2] / sha256[2:]
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            if destination.exists():
-                os.unlink(staged_name)
-            else:
-                os.replace(staged_name, destination)
+                self._sync(staged)
+            self._publish(staged_name, digest)
             staged_name = None
-            return StoredArtifact(sha256, storage_key, byte_size)
+            return self._stored_artifact(digest, byte_size)
         finally:
             if staged_name is not None:
                 Path(staged_name).unlink(missing_ok=True)
+
+    async def put_async(self, stream: AsyncIterator[bytes]) -> StoredArtifact:
+        """Stage an ASGI request stream without accumulating its complete body."""
+        self.staging_root.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256()
+        byte_size = 0
+        staged_name: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", dir=self.staging_root, prefix="upload-", delete=False
+            ) as staged:
+                staged_name = staged.name
+                async for incoming in stream:
+                    for offset in range(0, len(incoming), 1024 * 1024):
+                        chunk = incoming[offset : offset + 1024 * 1024]
+                        digest.update(chunk)
+                        byte_size += len(chunk)
+                        staged.write(chunk)
+                self._sync(staged)
+            self._publish(staged_name, digest)
+            staged_name = None
+            return self._stored_artifact(digest, byte_size)
+        finally:
+            if staged_name is not None:
+                Path(staged_name).unlink(missing_ok=True)
+
+    def _sync(self, staged: BinaryIO) -> None:
+        staged.flush()
+        os.fsync(staged.fileno())
+
+    def _publish(self, staged_name: str, digest: hashlib._Hash) -> None:
+        sha256 = digest.hexdigest()
+        destination = self.root / sha256[:2] / sha256[2:]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            os.unlink(staged_name)
+        else:
+            os.replace(staged_name, destination)
+
+    def _stored_artifact(
+        self, digest: hashlib._Hash, byte_size: int
+    ) -> StoredArtifact:
+        sha256 = digest.hexdigest()
+        return StoredArtifact(sha256, f"{sha256[:2]}/{sha256[2:]}", byte_size)
 
     def open(self, sha256: str) -> BinaryIO:
         if re.fullmatch(r"[0-9a-f]{64}", sha256) is None:

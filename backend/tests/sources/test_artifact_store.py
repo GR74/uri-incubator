@@ -39,3 +39,19 @@ def test_interrupted_stream_leaves_no_artifact_or_staging_file(tmp_path: Path) -
         store.put(BrokenStream())  # type: ignore[arg-type]
 
     assert list(tmp_path.rglob("*")) == [tmp_path / "staging"]
+
+
+async def test_async_stream_is_chunked_into_the_content_addressed_staging_file(
+    tmp_path: Path,
+) -> None:
+    """Route-style async input must use the store's staged, bounded intake."""
+
+    async def upload() -> object:
+        yield b"a" * (1024 * 1024 + 7)
+        yield b"b" * 19
+
+    store = LocalArtifactStore(tmp_path)
+    stored = await store.put_async(upload())
+
+    assert stored.storage_key == f"{stored.sha256[:2]}/{stored.sha256[2:]}"
+    assert store.open(stored.sha256).read() == b"a" * (1024 * 1024 + 7) + b"b" * 19

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
+import pytest
 import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -13,6 +15,7 @@ from uri_backend.api import create_app
 from uri_backend.config import Settings
 from uri_backend.projects.models import Project, ProjectMembership, User
 from uri_backend.sources.artifacts import StoredArtifact
+from uri_backend.sources.models import Artifact, Source, SourceVersion
 from uri_backend.sources.schemas import RegisterSourceVersion
 from uri_backend.sources.service import register_source_version
 
@@ -103,6 +106,91 @@ async def test_same_source_version_is_idempotent(
         await session.commit()
 
     assert first.id == second.id
+
+
+async def test_concurrent_source_registration_returns_one_version(
+    db_engine: AsyncEngine, source_fixture: SourceFixture
+) -> None:
+    """Two committing sessions must converge rather than leak a uniqueness error."""
+    command = RegisterSourceVersion(
+        project_id=source_fixture.project_id,
+        family="document",
+        external_id="race.md",
+        native_version="git:abc123",
+        media_type="text/markdown",
+    )
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as session:
+        session.add(Artifact(**artifact().__dict__))
+        session.add(
+            Source(
+                project_id=command.project_id,
+                family=command.family,
+                external_id=command.external_id,
+            )
+        )
+        await session.commit()
+
+    async def register_once() -> UUID:
+        async with factory() as session:
+            actor = await session.get(User, source_fixture.actor_id)
+            assert actor is not None
+            version = await register_source_version(session, actor, command, artifact())
+            await session.commit()
+            return version.id
+
+    first_id, second_id = await asyncio.gather(register_once(), register_once())
+
+    assert first_id == second_id
+
+
+async def test_database_rejects_source_version_mutation(
+    db_engine: AsyncEngine, source_fixture: SourceFixture
+) -> None:
+    """The append-only trigger must reject an update after registration."""
+    command = RegisterSourceVersion(
+        project_id=source_fixture.project_id,
+        family="document",
+        external_id="immutable.md",
+        native_version="git:abc123",
+        media_type="text/markdown",
+    )
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as session:
+        actor = await session.get(User, source_fixture.actor_id)
+        assert actor is not None
+        version = await register_source_version(session, actor, command, artifact())
+        await session.commit()
+
+    async with factory() as session:
+        with pytest.raises(sa.exc.DBAPIError, match="immutable"):
+            await session.execute(
+                sa.update(SourceVersion)
+                .where(SourceVersion.id == version.id)
+                .values(media_type="text/plain")
+            )
+
+
+async def test_path_traversal_external_id_never_shapes_artifact_storage(
+    client: httpx.AsyncClient, source_fixture: SourceFixture, tmp_path: Path
+) -> None:
+    response = await client.post(
+        f"/api/projects/{source_fixture.project_id}/sources/uploads",
+        headers={"X-URI-User-ID": str(source_fixture.actor_id)},
+        content=b"safe bytes",
+        params={
+            "family": "document",
+            "external_id": "../../outside.md",
+            "native_version": "git:abc123",
+            "media_type": "text/markdown",
+        },
+    )
+
+    assert response.status_code == 201
+    assert not (tmp_path / "outside.md").exists()
+    stored_files = [path for path in (tmp_path / "artifacts").rglob("*") if path.is_file()]
+    assert len(stored_files) == 1
+    assert stored_files[0].relative_to(tmp_path / "artifacts").as_posix().count("/") == 1
 
 
 async def test_cross_project_source_read_returns_not_found(

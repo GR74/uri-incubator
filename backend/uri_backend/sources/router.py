@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 from typing import Annotated
 from uuid import UUID
 
@@ -73,12 +72,9 @@ async def post_upload(
         await require_writable_project(session, actor, project_id)
     except ProjectReadOnly as error:
         raise HTTPException(status_code=409, detail="Stashed projects are read-only.") from error
-    settings.staging_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.SpooledTemporaryFile(mode="w+b", dir=settings.staging_root) as upload:
-        async for chunk in request.stream():
-            upload.write(chunk)
-        upload.seek(0)
-        stored = LocalArtifactStore(settings.artifact_root, settings.staging_root).put(upload)
+    stored = await LocalArtifactStore(
+        settings.artifact_root, settings.staging_root
+    ).put_async(request.stream())
     command = RegisterSourceVersion(
         project_id=project_id, family=family, external_id=external_id,
         native_version=native_version, media_type=media_type, title=title,
