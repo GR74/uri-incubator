@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from typing import BinaryIO, ClassVar
+from typing import BinaryIO
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -199,8 +199,6 @@ def _parse_export(raw: bytes) -> tuple[list[dict[str, object]], list[Conversatio
 
 
 class ConversationService:
-    _services: ClassVar[dict[tuple[UUID, UUID], ConversationService]] = {}
-
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
@@ -215,7 +213,6 @@ class ConversationService:
         self.actor_id = actor_id
         self.project_id = project_id
         self._stages: dict[str, _Stage] = {}
-        self._services[(actor_id, project_id)] = self
 
     def inventory(
         self, stream: BinaryIO, ttl: timedelta = timedelta(minutes=15)
@@ -444,7 +441,11 @@ def purge_expired_conversation_stages(staging_root: Path) -> StageCleanupResult:
     failures: list[str] = []
     if not staging_root.exists():
         return StageCleanupResult(purged, failures)
-    for staging_path in staging_root.iterdir():
+    try:
+        stage_paths = list(staging_root.iterdir())
+    except OSError:
+        return StageCleanupResult(purged, ["staging_root"])
+    for staging_path in stage_paths:
         if not staging_path.is_dir():
             continue
         try:
@@ -464,11 +465,15 @@ def purge_expired_conversation_stages(staging_root: Path) -> StageCleanupResult:
 
 
 async def promote_selected_conversations(
-    stage_id: str, conversation_ids: list[str], actor: User, project: Project
+    stage_id: str,
+    conversation_ids: list[str],
+    actor: User,
+    project: Project,
+    *,
+    service: ConversationService,
 ) -> list[SourceVersion]:
     """Promote an explicitly selected durable stage for its authorized actor/project."""
-    service = ConversationService._services.get((actor.id, project.id))
-    if service is None:
+    if service.actor_id != actor.id or service.project_id != project.id:
         raise UnknownConversation("Conversation stage was not found.")
     return await service.promote(stage_id, conversation_ids)
 

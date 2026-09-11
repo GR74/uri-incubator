@@ -298,7 +298,11 @@ async def test_restart_discovers_stage_and_public_promotion_interface(
         assert actor is not None
         assert project is not None
         promoted = await promote_selected_conversations(
-            inventory.stage_id, ["conv-clearermind"], actor, project
+            inventory.stage_id,
+            ["conv-clearermind"],
+            actor,
+            project,
+            service=restarted,
         )
 
     assert [version.external_id for version in promoted] == ["conv-clearermind"]
@@ -334,3 +338,27 @@ async def test_app_janitor_stops_cleanly_after_lifespan(tmp_path: Path) -> None:
 
     assert task.done()
     assert task.cancelled()
+
+
+def test_janitor_reports_root_traversal_failure_and_retries(
+    conversation_service, monkeypatch
+) -> None:
+    """A transient staging-root read error must not permanently disable expiry cleanup."""
+    conversation_service.staging_root.mkdir()
+    original_iterdir = Path.iterdir
+    calls = 0
+
+    def fail_once(path: Path):
+        nonlocal calls
+        if path == conversation_service.staging_root and calls == 0:
+            calls += 1
+            raise OSError("synthetic traversal failure")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", fail_once)
+
+    failed = purge_expired_conversation_stages(conversation_service.staging_root)
+    recovered = purge_expired_conversation_stages(conversation_service.staging_root)
+
+    assert failed.failures == ["staging_root"]
+    assert recovered.failures == []

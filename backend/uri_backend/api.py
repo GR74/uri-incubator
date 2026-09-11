@@ -75,6 +75,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok", "service": "uri-backend"}
 
+    @app.get("/api/operations/conversation-stages")
+    async def conversation_stage_operations() -> dict[str, object]:
+        task = app.state.conversation_stage_janitor_task
+        return {
+            "status": "healthy" if not task.done() else "degraded",
+            "cleanup_failures": app.state.conversation_stage_cleanup_failures,
+        }
+
     @app.get("/api/ready", response_model=None)
     async def ready():
         unavailable = {"status": "unavailable", "service": "uri-backend"}

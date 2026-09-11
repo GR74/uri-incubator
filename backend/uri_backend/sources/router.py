@@ -14,6 +14,7 @@ from uri_backend.ingestion.adapters.conversations import (
     ConversationStageError,
     StageExpired,
     UnknownConversation,
+    promote_selected_conversations,
 )
 from uri_backend.ingestion.adapters.git import (
     GIT_MANIFEST_MEDIA_TYPE,
@@ -21,7 +22,7 @@ from uri_backend.ingestion.adapters.git import (
     InvalidGitRange,
     UnsafeSourcePath,
 )
-from uri_backend.projects.models import User
+from uri_backend.projects.models import Project, User
 from uri_backend.projects.router import ActorDep, SessionDep
 from uri_backend.projects.service import (
     Capability,
@@ -272,8 +273,15 @@ async def post_conversation_promotion(
 ) -> list[SourceVersionResponse]:
     await require_git_write(session, actor, project_id)
     try:
-        versions = await conversation_service(request, actor, project_id).promote(
-            stage_id, command.conversation_ids
+        project = await session.get(Project, project_id)
+        if project is None:
+            raise UnknownConversation("Conversation project was not found.")
+        versions = await promote_selected_conversations(
+            stage_id,
+            command.conversation_ids,
+            actor,
+            project,
+            service=conversation_service(request, actor, project_id),
         )
     except StageExpired as error:
         raise HTTPException(status_code=410, detail="Conversation stage has expired.") from error
