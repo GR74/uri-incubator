@@ -11,11 +11,22 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from uri_backend.ingestion.adapters import AdapterRegistry
 from uri_backend.ingestion.adapters.documents import DocumentAdapter
-from uri_backend.ingestion.contracts import AdapterInput
-from uri_backend.ingestion.models import IngestionJob
-from uri_backend.ingestion.queue import enqueue_ingestion
-from uri_backend.ingestion.worker import build_default_dispatcher, run_worker
+from uri_backend.ingestion.contracts import (
+    AdapterInput,
+    NormalizationResult,
+    NormalizationWarning,
+    NormalizedPart,
+)
+from uri_backend.ingestion.models import IngestionJob, IngestionRun
+from uri_backend.ingestion.queue import ClaimedJob, enqueue_ingestion
+from uri_backend.ingestion.worker import (
+    build_default_dispatcher,
+    default_adapter_registry,
+    persist_normalization,
+    run_worker,
+)
 from uri_backend.projects.models import Project, ProjectMembership, User
 from uri_backend.sources.models import Artifact, ContentPart, Source, SourceVersion
 
@@ -110,7 +121,7 @@ async def clean_document_tables(db_engine: AsyncEngine) -> None:
 
 
 @pytest_asyncio.fixture
-async def document_run(db_engine: AsyncEngine, tmp_path: Path):
+async def document_run(clean_document_tables, db_engine: AsyncEngine, tmp_path: Path):
     artifact_root = tmp_path / "artifacts"
     content = (DOCUMENT_FIXTURES / "sample.md").read_bytes()
     digest = hashlib.sha256(content).hexdigest()
@@ -198,3 +209,209 @@ def test_default_dispatcher_registers_normalization_handler() -> None:
     dispatcher = build_default_dispatcher()
 
     assert dispatcher.can_dispatch("normalization-v1") is True
+
+
+def _claimed_normalization_job(run) -> ClaimedJob:
+    return ClaimedJob(id=uuid4(), run_id=run.id, attempt=1, pipeline_version="normalization-v1")
+
+
+async def _add_part(factory, run, *, text: str, ordinal: int = 1) -> None:
+    async with factory() as session:
+        session.add(
+            ContentPart(
+                source_version_id=run.source_version_id,
+                ordinal=ordinal,
+                kind="paragraph",
+                text=text,
+                locator={"line_start": ordinal, "line_end": ordinal},
+                metadata_={"ingestion_run_id": str(run.id)},
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("URI_TEST_DATABASE_URL"),
+    reason="requires explicitly configured isolated PostgreSQL",
+)
+async def test_retry_replaces_only_unpublished_parts_for_its_same_run(document_run) -> None:
+    """A retry must replace its own stale partial output rather than duplicate it."""
+    factory, artifact_root, run = document_run
+    async with factory() as session:
+        persisted_run = await session.get(IngestionRun, run.id)
+        assert persisted_run is not None
+        persisted_run.status = "running"
+        await session.commit()
+    await _add_part(factory, run, text="stale partial output")
+
+    await persist_normalization(
+        factory, _claimed_normalization_job(run), artifact_root, default_adapter_registry()
+    )
+
+    async with factory() as session:
+        parts = (
+            await session.scalars(
+                sa.select(ContentPart)
+                .where(ContentPart.source_version_id == run.source_version_id)
+                .order_by(ContentPart.ordinal)
+            )
+        ).all()
+    assert [part.text for part in parts] == [
+        "URI document heading",
+        "First fictional research note.\nSecond fictional research note.",
+    ]
+
+
+@pytest.mark.skipif(
+    not os.environ.get("URI_TEST_DATABASE_URL"),
+    reason="requires explicitly configured isolated PostgreSQL",
+)
+async def test_successful_run_parts_reject_deletion_even_with_matching_session_token(document_run) -> None:
+    """A mutable session token alone must never permit deletion of published parts."""
+    factory, _, run = document_run
+    await _add_part(factory, run, text="published output")
+    async with factory() as session:
+        persisted_run = await session.get(IngestionRun, run.id)
+        assert persisted_run is not None
+        persisted_run.status = "succeeded"
+        await session.commit()
+
+    async with factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('uri.ingestion_run_id', :run_id, true)"),
+            {"run_id": str(run.id)},
+        )
+        with pytest.raises(sa.exc.DBAPIError):
+            await session.execute(
+                sa.delete(ContentPart).where(ContentPart.source_version_id == run.source_version_id)
+            )
+        await session.rollback()
+
+    async with factory() as session:
+        assert await session.scalar(
+            sa.select(sa.func.count()).select_from(ContentPart)
+        ) == 1
+
+
+@pytest.mark.skipif(
+    not os.environ.get("URI_TEST_DATABASE_URL"),
+    reason="requires explicitly configured isolated PostgreSQL",
+)
+async def test_different_run_parts_reject_deletion_from_current_run(document_run) -> None:
+    """A current retry must not use its token to mutate an earlier run's output."""
+    factory, _, run = document_run
+    earlier_run = IngestionRun(
+        source_version_id=run.source_version_id,
+        pipeline_version="normalization-earlier-v1",
+        idempotency_key="normalization-earlier-v1",
+        status="running",
+    )
+    async with factory() as session:
+        session.add(earlier_run)
+        await session.commit()
+    await _add_part(factory, earlier_run, text="earlier output")
+
+    async with factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('uri.ingestion_run_id', :run_id, true)"),
+            {"run_id": str(run.id)},
+        )
+        with pytest.raises(sa.exc.DBAPIError):
+            await session.execute(
+                sa.delete(ContentPart).where(ContentPart.source_version_id == run.source_version_id)
+            )
+        await session.rollback()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("URI_TEST_DATABASE_URL"),
+    reason="requires explicitly configured isolated PostgreSQL",
+)
+async def test_failed_normalization_rolls_back_replacement_deletion(document_run) -> None:
+    """A parser failure must retain old parts because replacement is one transaction."""
+    factory, artifact_root, run = document_run
+    async with factory() as session:
+        persisted_run = await session.get(IngestionRun, run.id)
+        assert persisted_run is not None
+        persisted_run.status = "running"
+        await session.commit()
+    await _add_part(factory, run, text="stale output")
+
+    class FailingAdapter:
+        def supports(self, context: AdapterInput) -> bool:
+            return True
+
+        def normalize(self, context: AdapterInput) -> NormalizationResult:
+            return NormalizationResult(
+                adapter="failing",
+                adapter_version="v1",
+                status="failed",
+                parts=[],
+                warnings=[NormalizationWarning(code="parse_error", message="synthetic failure")],
+                parse_coverage=0.0,
+            )
+
+    with pytest.raises(ValueError, match="Document normalization failed"):
+        await persist_normalization(
+            factory,
+            _claimed_normalization_job(run),
+            artifact_root,
+            AdapterRegistry([FailingAdapter()]),
+        )
+
+    async with factory() as session:
+        parts = (await session.scalars(sa.select(ContentPart))).all()
+    assert [part.text for part in parts] == ["stale output"]
+
+
+@pytest.mark.skipif(
+    not os.environ.get("URI_TEST_DATABASE_URL"),
+    reason="requires explicitly configured isolated PostgreSQL",
+)
+async def test_partial_insert_failure_rolls_back_replacement_deletion(document_run) -> None:
+    """A database failure after replacement starts must restore the old complete part set."""
+    factory, artifact_root, run = document_run
+    async with factory() as session:
+        persisted_run = await session.get(IngestionRun, run.id)
+        assert persisted_run is not None
+        persisted_run.status = "running"
+        await session.commit()
+    await _add_part(factory, run, text="stale output")
+
+    class DuplicateOrdinalAdapter:
+        def supports(self, context: AdapterInput) -> bool:
+            return True
+
+        def normalize(self, context: AdapterInput) -> NormalizationResult:
+            return NormalizationResult(
+                adapter="duplicate",
+                adapter_version="v1",
+                status="normalized",
+                parts=[
+                    NormalizedPart(
+                        ordinal=1,
+                        kind="paragraph",
+                        text="first new part",
+                        locator={"line_start": 1, "line_end": 1},
+                    ),
+                    NormalizedPart(
+                        ordinal=1,
+                        kind="paragraph",
+                        text="duplicate new part",
+                        locator={"line_start": 2, "line_end": 2},
+                    ),
+                ],
+                parse_coverage=1.0,
+            )
+
+    with pytest.raises(sa.exc.IntegrityError):
+        await persist_normalization(
+            factory,
+            _claimed_normalization_job(run),
+            artifact_root,
+            AdapterRegistry([DuplicateOrdinalAdapter()]),
+        )
+
+    async with factory() as session:
+        parts = (await session.scalars(sa.select(ContentPart))).all()
+    assert [part.text for part in parts] == ["stale output"]
