@@ -20,13 +20,39 @@ from uri_backend.ingestion.queue import (
 JobHandler = Callable[[ClaimedJob], Awaitable[None]]
 
 
-async def unavailable_handler(_: ClaimedJob) -> None:
-    raise RuntimeError("No ingestion handler is configured")
+class PipelineDispatcher:
+    """Explicit registry boundary for pipeline-specific workers added by later tasks."""
+
+    def __init__(self) -> None:
+        self._handlers: dict[str, JobHandler] = {}
+
+    def register(self, pipeline_version: str, handler: JobHandler) -> None:
+        if not pipeline_version:
+            raise ValueError("pipeline_version is required")
+        self._handlers[pipeline_version] = handler
+
+    async def dispatch(self, job: ClaimedJob) -> None:
+        handler = self._handlers.get(job.pipeline_version)
+        if handler is None:
+            raise LookupError(f"No handler registered for pipeline {job.pipeline_version!r}")
+        await handler(job)
 
 
-async def run_worker(sessions: async_sessionmaker[AsyncSession], handler: JobHandler = unavailable_handler, *, worker_id: str | None = None, poll_seconds: float = 1.0, lease_seconds: int = 30) -> None:
+DEFAULT_DISPATCHER = PipelineDispatcher()
+
+
+async def _complete_transition(
+    sessions: async_sessionmaker[AsyncSession], job_id, worker_id: str
+) -> None:
+    async with sessions() as session:
+        await complete_job(session, job_id, worker_id)
+        await session.commit()
+
+
+async def run_worker(sessions: async_sessionmaker[AsyncSession], dispatcher: PipelineDispatcher | None = None, *, worker_id: str | None = None, poll_seconds: float = 1.0, lease_seconds: int = 30) -> None:
     """Process one committed database transition at a time until cancellation."""
     identity = worker_id or f"{socket.gethostname()}:{os.getpid()}"
+    active_dispatcher = dispatcher or DEFAULT_DISPATCHER
     while True:
         async with sessions() as session:
             claimed = await claim_next_job(session, identity, lease_seconds)
@@ -35,7 +61,7 @@ async def run_worker(sessions: async_sessionmaker[AsyncSession], handler: JobHan
             await asyncio.sleep(poll_seconds)
             continue
         try:
-            await handler(claimed)
+            await active_dispatcher.dispatch(claimed)
         except asyncio.CancelledError:
             async with sessions() as session:
                 await cancel_job(session, claimed.id, identity)
@@ -46,9 +72,14 @@ async def run_worker(sessions: async_sessionmaker[AsyncSession], handler: JobHan
                 await fail_job(session, claimed.id, identity, "handler_error", "Worker handler failed")
                 await session.commit()
         else:
-            async with sessions() as session:
-                await complete_job(session, claimed.id, identity)
-                await session.commit()
+            completion = asyncio.create_task(
+                _complete_transition(sessions, claimed.id, identity)
+            )
+            try:
+                await asyncio.shield(completion)
+            except asyncio.CancelledError:
+                await asyncio.shield(completion)
+                raise
 
 
 def main() -> None:

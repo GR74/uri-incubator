@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uri_backend.ingestion.models import IngestionJob, IngestionJobAttempt, IngestionRun
 
 MAX_ERROR_DETAIL = 1000
+SAFE_ERROR_DETAILS = frozenset({"Worker lease expired", "Worker handler failed"})
 
 
 class JobLeaseLost(Exception):
@@ -22,10 +23,16 @@ class ClaimedJob:
     id: UUID
     run_id: UUID
     attempt: int
+    pipeline_version: str
 
 
 def _bounded_detail(detail: str | None) -> str | None:
-    return detail.strip()[:MAX_ERROR_DETAIL] if detail is not None else None
+    if detail is None:
+        return None
+    normalized = detail.strip()[:MAX_ERROR_DETAIL]
+    if normalized in SAFE_ERROR_DETAILS:
+        return normalized
+    return "Error detail redacted"
 
 
 async def enqueue_ingestion(session: AsyncSession, source_version_id: UUID, idempotency_key: str) -> IngestionRun:
@@ -43,37 +50,32 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
     if lease_seconds <= 0:
         raise ValueError("lease_seconds must be positive")
     now = sa.func.now()
-    expired_runs = (
-        await session.execute(
-            sa.update(IngestionJob)
-            .where(
-                IngestionJob.status == "running",
-                IngestionJob.lease_expires_at <= now,
-                IngestionJob.attempt >= IngestionJob.max_attempts,
-            )
-            .values(
-                status="failed",
-                completed_at=now,
-                error_code="lease_expired",
-                error_detail="Worker lease expired",
-            )
-            .returning(IngestionJob.run_id)
+    while terminal := await session.scalar(
+        sa.select(IngestionJob)
+        .where(
+            IngestionJob.status == "running",
+            IngestionJob.lease_expires_at <= now,
+            IngestionJob.attempt >= IngestionJob.max_attempts,
         )
-    ).scalars().all()
-    if expired_runs:
-        await session.execute(
-            sa.update(IngestionRun)
-            .where(IngestionRun.id.in_(expired_runs))
-            .values(
-                status="failed",
-                completed_at=now,
-                error_code="lease_expired",
-                error_detail="Worker lease expired",
-            )
-        )
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    ):
+        await _finish_attempt(session, terminal, "lease_expired", "lease_expired", "Worker lease expired")
+        terminal.status = "failed"
+        terminal.completed_at = now
+        terminal.error_code = "lease_expired"
+        terminal.error_detail = "Worker lease expired"
+        run = await session.get(IngestionRun, terminal.run_id)
+        assert run is not None
+        run.status, run.completed_at = "failed", now
+        run.error_code, run.error_detail = "lease_expired", "Worker lease expired"
     candidate = await session.scalar(sa.select(IngestionJob).where(sa.or_(sa.and_(IngestionJob.status == "queued", IngestionJob.available_at <= now), sa.and_(IngestionJob.status == "running", IngestionJob.lease_expires_at <= now, IngestionJob.attempt < IngestionJob.max_attempts))).order_by(IngestionJob.available_at, IngestionJob.created_at).with_for_update(skip_locked=True).limit(1))
     if candidate is None:
         return None
+    if candidate.status == "running":
+        await _finish_attempt(
+            session, candidate, "lease_expired", "lease_expired", "Worker lease expired"
+        )
     candidate.status, candidate.worker_id = "running", worker_id
     candidate.attempt += 1
     candidate.heartbeat_at, candidate.lease_expires_at = now, now + timedelta(seconds=lease_seconds)
@@ -83,7 +85,7 @@ async def claim_next_job(session: AsyncSession, worker_id: str, lease_seconds: i
     run.status, run.error_code, run.error_detail = "running", None, None
     session.add(IngestionJobAttempt(job_id=candidate.id, attempt=candidate.attempt, worker_id=worker_id))
     await session.flush()
-    return ClaimedJob(candidate.id, candidate.run_id, candidate.attempt)
+    return ClaimedJob(candidate.id, candidate.run_id, candidate.attempt, run.pipeline_version)
 
 
 async def _owned_job(session: AsyncSession, job_id: UUID, worker_id: str) -> IngestionJob:

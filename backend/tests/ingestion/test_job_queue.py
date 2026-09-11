@@ -19,6 +19,7 @@ from uri_backend.ingestion.queue import (
     fail_job,
     heartbeat_job,
 )
+from uri_backend.ingestion.worker import PipelineDispatcher, run_worker
 from uri_backend.projects.models import Project, ProjectMembership, User
 from uri_backend.sources.models import Artifact, Source, SourceVersion
 
@@ -164,7 +165,7 @@ async def test_failure_retries_then_records_a_bounded_terminal_error(
 
     assert failed.status == "failed"
     assert failed.error_code == "parse_error"
-    assert len(failed.error_detail or "") == 1000
+    assert len(failed.error_detail or "") <= 1000
 
 
 async def test_enqueue_is_idempotent_per_source_version_and_pipeline(
@@ -195,3 +196,111 @@ async def test_cancel_requires_owner_and_is_terminal(
         await session.commit()
 
     assert cancelled.status == "cancelled"
+
+
+async def test_expired_lease_closes_the_prior_attempt_before_retrying(
+    db_engine: AsyncEngine, source_version_id: UUID
+) -> None:
+    """A lost worker lease must leave an auditable closed attempt, not an open orphan."""
+    await enqueue(db_engine, source_version_id)
+    first = await claim(db_engine, "worker-a")
+    assert first is not None
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        await session.execute(
+            sa.update(IngestionJob)
+            .where(IngestionJob.id == first.id)
+            .values(lease_expires_at=sa.func.now() - timedelta(seconds=1))
+        )
+        await session.commit()
+
+    retry = await claim(db_engine, "worker-b")
+    assert retry is not None
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        history = (await session.execute(
+            sa.text("SELECT outcome, error_code, finished_at FROM ingestion_job_attempts WHERE job_id = :job_id AND attempt = 1"),
+            {"job_id": first.id},
+        )).one()
+
+    assert history.outcome == "lease_expired"
+    assert history.error_code == "lease_expired"
+    assert history.finished_at is not None
+
+
+async def test_final_expired_lease_closes_the_prior_attempt_before_terminal_failure(
+    db_engine: AsyncEngine, source_version_id: UUID
+) -> None:
+    """A maxed-out lost lease must close history before its job becomes terminal."""
+    run = await enqueue(db_engine, source_version_id)
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        job = await session.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
+        assert job is not None
+        job.max_attempts = 1
+        await session.commit()
+    first = await claim(db_engine, "worker-a")
+    assert first is not None
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        await session.execute(
+            sa.update(IngestionJob)
+            .where(IngestionJob.id == first.id)
+            .values(lease_expires_at=sa.func.now() - timedelta(seconds=1))
+        )
+        await session.commit()
+
+    assert await claim(db_engine, "worker-b") is None
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        history = (await session.execute(
+            sa.text("SELECT outcome, error_code, finished_at FROM ingestion_job_attempts WHERE job_id = :job_id"),
+            {"job_id": first.id},
+        )).one()
+        status = await session.scalar(sa.select(IngestionJob.status).where(IngestionJob.id == first.id))
+
+    assert history.outcome == "lease_expired"
+    assert history.error_code == "lease_expired"
+    assert history.finished_at is not None
+    assert status == "failed"
+
+
+async def test_error_detail_is_redacted_before_persistence(
+    db_engine: AsyncEngine, source_version_id: UUID
+) -> None:
+    """Raw tokens and source excerpts must never survive in job, run, or attempt diagnostics."""
+    await enqueue(db_engine, source_version_id)
+    claimed = await claim(db_engine, "worker-a")
+    assert claimed is not None
+    secret = "Bearer sk-live-123 source excerpt: participant private methods"
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        await fail_job(session, claimed.id, "worker-a", "parse_error", secret)
+        await session.commit()
+        persisted = (await session.execute(
+            sa.text("SELECT error_detail FROM ingestion_jobs UNION ALL SELECT error_detail FROM ingestion_runs UNION ALL SELECT error_detail FROM ingestion_job_attempts")
+        )).scalars().all()
+
+    assert all(secret not in (detail or "") for detail in persisted)
+    assert all("sk-live" not in (detail or "") for detail in persisted)
+    assert all("participant private methods" not in (detail or "") for detail in persisted)
+
+
+async def test_worker_dispatches_registered_pipeline_then_stops_cleanly(
+    db_engine: AsyncEngine, source_version_id: UUID
+) -> None:
+    """The worker must use a registered pipeline handler and commit its terminal transition."""
+    await enqueue(db_engine, source_version_id)
+    handled = asyncio.Event()
+    dispatcher = PipelineDispatcher()
+
+    async def handler(_: object) -> None:
+        handled.set()
+
+    dispatcher.register("test-pipeline", handler)
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    worker = asyncio.create_task(
+        run_worker(factory, dispatcher=dispatcher, worker_id="worker-a", poll_seconds=10)
+    )
+    await asyncio.wait_for(handled.wait(), timeout=2)
+    await asyncio.sleep(0)
+    worker.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await worker
+
+    async with factory() as session:
+        assert await session.scalar(sa.select(IngestionJob.status)) == "succeeded"
