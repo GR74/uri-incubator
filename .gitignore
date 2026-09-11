@@ -4,3 +4,10 @@ node_modules/
 _*.html
 _srv.py
 .DS_Store
+backend/.env
+backend/.local/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.venv/
+backend/__pycache__/
+backend/**/*.py[cod]
