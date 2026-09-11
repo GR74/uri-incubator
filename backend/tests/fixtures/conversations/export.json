@@ -1,0 +1,24 @@
+[
+  {
+    "id": "conv-clearermind",
+    "title": "Selected synthetic discussion",
+    "create_time": 1700000000,
+    "update_time": 1700000200,
+    "current_node": "answer",
+    "mapping": {
+      "root": {"id": "root", "parent": null, "message": null},
+      "prompt": {"id": "prompt", "parent": "root", "message": {"id": "msg-prompt", "author": {"role": "user", "name": "Synthetic User"}, "create_time": 1700000001, "content": {"parts": ["Selected research question"]}}},
+      "answer": {"id": "answer", "parent": "prompt", "message": {"id": "msg-answer", "author": {"role": "assistant", "name": "Synthetic Assistant"}, "create_time": 1700000002, "content": {"parts": ["Selected synthetic answer"]}}},
+      "branch": {"id": "branch", "parent": "prompt", "message": {"id": "msg-branch", "author": {"role": "assistant"}, "content": {"parts": ["BRANCHED_UNSELECTED_MESSAGE"]}}}
+    }
+  },
+  {
+    "id": "conv-unrelated",
+    "title": "Unselected synthetic discussion",
+    "create_time": null,
+    "update_time": null,
+    "mapping": {
+      "only": {"id": "only", "parent": null, "message": {"id": "msg-unrelated", "author": {"role": "user"}, "content": {"parts": ["UNSELECTED_SECRET_MARKER"]}}}
+    }
+  }
+]

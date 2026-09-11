@@ -38,6 +38,16 @@ class GitPreviewResponse(BaseModel):
     exclusions: list[dict[str, str]]
 
 
+class ConversationPreviewResponse(BaseModel):
+    stage_id: str
+    conversations: list[dict[str, JsonValue]]
+    expires_at: datetime
+
+
+class ConversationSelectionCommand(BaseModel):
+    conversation_ids: list[str] = Field(default_factory=list)
+
+
 class NormalizedPart(BaseModel):
     ordinal: int
     kind: str

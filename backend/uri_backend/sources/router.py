@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from io import BytesIO
 from typing import Annotated
 from uuid import UUID
 
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Query, Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from uri_backend.ingestion.adapters.conversations import (
+    ConversationService,
+    ConversationStageError,
+    StageExpired,
+    UnknownConversation,
+)
 from uri_backend.ingestion.adapters.git import (
     GIT_MANIFEST_MEDIA_TYPE,
     GitAdapter,
@@ -25,6 +32,8 @@ from uri_backend.sources.artifacts import LocalArtifactStore
 from uri_backend.sources.models import ContentPart, Source, SourceVersion
 from uri_backend.sources.schemas import (
     ContentPartResponse,
+    ConversationPreviewResponse,
+    ConversationSelectionCommand,
     GitPreviewResponse,
     GitRegistrationCommand,
     GitSourceCommand,
@@ -39,6 +48,34 @@ from uri_backend.sources.service import (
 )
 
 router = APIRouter(prefix="/api", tags=["sources"])
+
+
+def conversation_service(request: Request, actor: User, project_id: UUID) -> ConversationService:
+    services = getattr(request.app.state, "conversation_services", None)
+    if services is None:
+        services = {}
+        request.app.state.conversation_services = services
+    key = (actor.id, project_id)
+    service = services.get(key)
+    if service is None:
+        settings = request.app.state.settings
+        service = ConversationService(
+            async_sessionmaker(request.app.state.database_engine, expire_on_commit=False),
+            LocalArtifactStore(settings.artifact_root, settings.staging_root),
+            settings.staging_root / "conversation-exports",
+            actor.id,
+            project_id,
+        )
+        services[key] = service
+    return service
+
+
+def conversation_preview_response(inventory) -> ConversationPreviewResponse:
+    return ConversationPreviewResponse(
+        stage_id=inventory.stage_id,
+        conversations=[item.model_dump(mode="json") for item in inventory.conversations],
+        expires_at=inventory.expires_at,
+    )
 
 
 def hide_unreadable(error: CapabilityDenied) -> HTTPException:
@@ -197,6 +234,71 @@ async def post_git_source(
         stored,
     )
     return version_response(version)
+
+
+@router.post(
+    "/projects/{project_id}/sources/conversations/preview",
+    response_model=ConversationPreviewResponse,
+    status_code=201,
+)
+async def post_conversation_preview(
+    project_id: UUID,
+    request: Request,
+    actor: ActorDep,
+    session: SessionDep,
+) -> ConversationPreviewResponse:
+    await require_git_write(session, actor, project_id)
+    try:
+        inventory = await conversation_service(request, actor, project_id).inventory_async(
+            request.stream(), timedelta(minutes=15)
+        )
+    except ConversationStageError as error:
+        raise HTTPException(status_code=422, detail="Conversation export could not be staged.") from error
+    return conversation_preview_response(inventory)
+
+
+@router.post(
+    "/projects/{project_id}/sources/conversations/{stage_id}/promote",
+    response_model=list[SourceVersionResponse],
+    status_code=201,
+)
+async def post_conversation_promotion(
+    project_id: UUID,
+    stage_id: str,
+    command: ConversationSelectionCommand,
+    request: Request,
+    actor: ActorDep,
+    session: SessionDep,
+) -> list[SourceVersionResponse]:
+    await require_git_write(session, actor, project_id)
+    try:
+        versions = await conversation_service(request, actor, project_id).promote(
+            stage_id, command.conversation_ids
+        )
+    except StageExpired as error:
+        raise HTTPException(status_code=410, detail="Conversation stage has expired.") from error
+    except (UnknownConversation, ConversationStageError) as error:
+        raise HTTPException(status_code=422, detail="Conversation stage could not be promoted.") from error
+    return [version_response(version) for version in versions]
+
+
+@router.delete(
+    "/projects/{project_id}/sources/conversations/{stage_id}",
+    status_code=204,
+    response_model=None,
+)
+async def delete_conversation_stage(
+    project_id: UUID,
+    stage_id: str,
+    request: Request,
+    actor: ActorDep,
+    session: SessionDep,
+) -> None:
+    await require_git_write(session, actor, project_id)
+    try:
+        conversation_service(request, actor, project_id).cancel(stage_id)
+    except ConversationStageError as error:
+        raise HTTPException(status_code=500, detail="Conversation stage purge failed.") from error
 
 
 @router.post(
