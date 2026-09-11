@@ -16,6 +16,12 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from uri_backend.ingestion.contracts import (
+    AdapterInput,
+    NormalizationResult,
+    NormalizationWarning,
+    NormalizedPart,
+)
 from uri_backend.projects.models import AuditEvent, Project, User
 from uri_backend.sources.artifacts import LocalArtifactStore
 from uri_backend.sources.models import SourceVersion
@@ -27,6 +33,75 @@ MAX_EXPORT_BYTES = 16 * 1024 * 1024
 MAX_CONVERSATIONS = 1_000
 MAX_MESSAGES_PER_CONVERSATION = 10_000
 MAX_NESTING = 100
+
+
+class ConversationAdapter:
+    """Normalize only the already-selected canonical conversation artifact."""
+
+    name = "conversation"
+    version = "normalization-v1"
+
+    def supports(self, context: AdapterInput) -> bool:
+        return (
+            context.family == "conversation"
+            and context.media_type == CONVERSATION_MEDIA_TYPE
+        )
+
+    def normalize(self, context: AdapterInput) -> NormalizationResult:
+        if not self.supports(context):
+            return self._result("unsupported", [], "unsupported_conversation")
+        try:
+            payload = json.loads(context.artifact_path.read_text(encoding="utf-8"))
+            conversation_id = payload["conversation_id"]
+            messages = payload["messages"]
+            if not isinstance(conversation_id, str) or not isinstance(messages, list):
+                raise TypeError("invalid canonical conversation")
+            parts = [
+                NormalizedPart(
+                    ordinal=int(message["ordinal"]),
+                    kind="message",
+                    text=str(message["text"]),
+                    locator={
+                        "conversation_id": conversation_id,
+                        "message_id": str(message["message_id"]),
+                        "node_id": str(message["node_id"]),
+                    },
+                    author_label=message.get("author_label")
+                    if isinstance(message.get("author_label"), str)
+                    else None,
+                    source_time=datetime.fromisoformat(message["timestamp"])
+                    if isinstance(message.get("timestamp"), str)
+                    else None,
+                    metadata={"role": str(message["role"])},
+                )
+                for message in messages
+            ]
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return self._result("failed", [], "parse_error")
+        return NormalizationResult(
+            adapter=self.name,
+            adapter_version=self.version,
+            status="normalized",
+            parts=parts,
+            parse_coverage=1.0,
+        )
+
+    def _result(
+        self, status: str, parts: list[NormalizedPart], warning_code: str
+    ) -> NormalizationResult:
+        return NormalizationResult(
+            adapter=self.name,
+            adapter_version=self.version,
+            status=status,  # type: ignore[arg-type]
+            parts=parts,
+            warnings=[
+                NormalizationWarning(
+                    code=warning_code,
+                    message="Conversation normalization could not complete.",
+                )
+            ],
+            parse_coverage=0.0,
+        )
 
 
 class ConversationStageError(Exception):
@@ -98,22 +173,30 @@ def _validate_nesting(value: object, depth: int = 0) -> None:
 def _conversation_messages(conversation: dict[str, object]) -> list[dict[str, object]]:
     mapping = conversation.get("mapping")
     if not isinstance(mapping, dict):
-        raise ExportMalformed("Conversation export has an unsupported conversation shape.")
+        raise ExportMalformed(
+            "Conversation export has an unsupported conversation shape."
+        )
     current = conversation.get("current_node")
     nodes: list[dict[str, object]] = []
     if isinstance(current, str):
         seen: set[str] = set()
         while current is not None:
             if current in seen or len(seen) >= MAX_MESSAGES_PER_CONVERSATION:
-                raise ExportMalformed("Conversation export has an invalid message graph.")
+                raise ExportMalformed(
+                    "Conversation export has an invalid message graph."
+                )
             seen.add(current)
             node = mapping.get(current)
             if not isinstance(node, dict):
-                raise ExportMalformed("Conversation export has an invalid message graph.")
+                raise ExportMalformed(
+                    "Conversation export has an invalid message graph."
+                )
             nodes.append(node)
             parent = node.get("parent")
             if parent is not None and not isinstance(parent, str):
-                raise ExportMalformed("Conversation export has an invalid message graph.")
+                raise ExportMalformed(
+                    "Conversation export has an invalid message graph."
+                )
             current = parent
         nodes.reverse()
     else:
@@ -124,17 +207,25 @@ def _conversation_messages(conversation: dict[str, object]) -> list[dict[str, ob
         if message is None:
             continue
         if not isinstance(message, dict):
-            raise ExportMalformed("Conversation export has an unsupported message shape.")
+            raise ExportMalformed(
+                "Conversation export has an unsupported message shape."
+            )
         author = message.get("author")
         content = message.get("content")
         if not isinstance(author, dict) or not isinstance(content, dict):
-            raise ExportMalformed("Conversation export has an unsupported message shape.")
+            raise ExportMalformed(
+                "Conversation export has an unsupported message shape."
+            )
         role = author.get("role")
         parts = content.get("parts")
-        if not isinstance(role, str) or not isinstance(parts, list) or not all(
-            isinstance(part, str) for part in parts
+        if (
+            not isinstance(role, str)
+            or not isinstance(parts, list)
+            or not all(isinstance(part, str) for part in parts)
         ):
-            raise ExportMalformed("Conversation export has an unsupported message shape.")
+            raise ExportMalformed(
+                "Conversation export has an unsupported message shape."
+            )
         message_id = message.get("id")
         node_id = node.get("id")
         parent_id = node.get("parent")
@@ -143,7 +234,9 @@ def _conversation_messages(conversation: dict[str, object]) -> list[dict[str, ob
             or not isinstance(node_id, str)
             or (parent_id is not None and not isinstance(parent_id, str))
         ):
-            raise ExportMalformed("Conversation export has an unsupported message shape.")
+            raise ExportMalformed(
+                "Conversation export has an unsupported message shape."
+            )
         messages.append(
             {
                 "ordinal": len(messages) + 1,
@@ -161,7 +254,9 @@ def _conversation_messages(conversation: dict[str, object]) -> list[dict[str, ob
     return messages
 
 
-def _parse_export(raw: bytes) -> tuple[list[dict[str, object]], list[ConversationInventoryItem]]:
+def _parse_export(
+    raw: bytes,
+) -> tuple[list[dict[str, object]], list[ConversationInventoryItem]]:
     try:
         decoded = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -174,10 +269,18 @@ def _parse_export(raw: bytes) -> tuple[list[dict[str, object]], list[Conversatio
     seen_ids: set[str] = set()
     for conversation in decoded:
         if not isinstance(conversation, dict):
-            raise ExportMalformed("Conversation export has an unsupported conversation shape.")
+            raise ExportMalformed(
+                "Conversation export has an unsupported conversation shape."
+            )
         external_id = conversation.get("id")
-        if not isinstance(external_id, str) or not external_id or external_id in seen_ids:
-            raise ExportMalformed("Conversation export has an invalid conversation identifier.")
+        if (
+            not isinstance(external_id, str)
+            or not external_id
+            or external_id in seen_ids
+        ):
+            raise ExportMalformed(
+                "Conversation export has an invalid conversation identifier."
+            )
         seen_ids.add(external_id)
         title = conversation.get("title")
         if title is not None and not isinstance(title, str):
@@ -231,7 +334,9 @@ class ConversationService:
                 while chunk := stream.read(1024 * 1024):
                     byte_size += len(chunk)
                     if byte_size > MAX_EXPORT_BYTES:
-                        raise ExportMalformed("Conversation export exceeds the byte limit.")
+                        raise ExportMalformed(
+                            "Conversation export exceeds the byte limit."
+                        )
                     digest.update(chunk)
                     output.write(chunk)
                 output.flush()
@@ -260,7 +365,9 @@ class ConversationService:
                         chunk = incoming[offset : offset + 1024 * 1024]
                         byte_size += len(chunk)
                         if byte_size > MAX_EXPORT_BYTES:
-                            raise ExportMalformed("Conversation export exceeds the byte limit.")
+                            raise ExportMalformed(
+                                "Conversation export exceeds the byte limit."
+                            )
                         digest.update(chunk)
                         output.write(chunk)
                 output.flush()
@@ -293,7 +400,9 @@ class ConversationService:
             "project_id": str(self.project_id),
             "expires_at": stage.inventory.expires_at.isoformat(),
             "source_export_sha256": stage.export_hash,
-            "conversations": [item.model_dump(mode="json") for item in stage.inventory.conversations],
+            "conversations": [
+                item.model_dump(mode="json") for item in stage.inventory.conversations
+            ],
         }
         with manifest_path.open("x", encoding="utf-8") as output:
             os.chmod(manifest_path, 0o600)
@@ -319,7 +428,10 @@ class ConversationService:
                 return None
             inventory = StagedConversationInventory(
                 stage_id=stage_id,
-                conversations=[ConversationInventoryItem.model_validate(item) for item in payload["conversations"]],
+                conversations=[
+                    ConversationInventoryItem.model_validate(item)
+                    for item in payload["conversations"]
+                ],
                 expires_at=datetime.fromisoformat(payload["expires_at"]),
                 staging_path=staging_path,
             )
@@ -348,7 +460,9 @@ class ConversationService:
         available = {item.external_id for item in stage.inventory.conversations}
         if not set(selected).issubset(available):
             self.cancel(stage_id)
-            raise UnknownConversation("Selected conversation was not found in this stage.")
+            raise UnknownConversation(
+                "Selected conversation was not found in this stage."
+            )
         if not selected:
             self.cancel(stage_id)
             return []
@@ -360,11 +474,15 @@ class ConversationService:
                 actor = await session.get(User, self.actor_id)
                 project = await session.get(Project, self.project_id)
                 if actor is None or project is None:
-                    raise UnknownConversation("Conversation promotion context was not found.")
+                    raise UnknownConversation(
+                        "Conversation promotion context was not found."
+                    )
                 versions: list[SourceVersion] = []
                 for external_id in selected:
                     conversation = by_id[external_id]
-                    canonical = self._canonical_conversation(conversation, stage.export_hash)
+                    canonical = self._canonical_conversation(
+                        conversation, stage.export_hash
+                    )
                     stored = self.artifact_store.put(BytesIO(canonical))
                     version = await register_source_version(
                         session,
@@ -375,7 +493,9 @@ class ConversationService:
                             external_id=external_id,
                             native_version=f"chatgpt-export:{stage.export_hash}:{external_id}",
                             media_type=CONVERSATION_MEDIA_TYPE,
-                            title=conversation.get("title") if isinstance(conversation.get("title"), str) else None,
+                            title=conversation.get("title")
+                            if isinstance(conversation.get("title"), str)
+                            else None,
                             metadata={"source_export_sha256": stage.export_hash},
                         ),
                         stored,
@@ -416,7 +536,9 @@ class ConversationService:
                 for message in messages
             ],
         }
-        return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return json.dumps(
+            payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
 
     def _purge_path(self, staging_path: Path) -> None:
         try:
@@ -449,7 +571,9 @@ def purge_expired_conversation_stages(staging_root: Path) -> StageCleanupResult:
         if not staging_path.is_dir():
             continue
         try:
-            payload = json.loads((staging_path / "stage.json").read_text(encoding="utf-8"))
+            payload = json.loads(
+                (staging_path / "stage.json").read_text(encoding="utf-8")
+            )
             expires_at = datetime.fromisoformat(payload["expires_at"])
             expired = datetime.now(UTC) >= expires_at
         except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
@@ -483,6 +607,10 @@ def stage_conversation_export(
 ) -> StagedConversationInventory:
     """Stage and inspect an export without creating any durable source artifact."""
     service = ConversationService(
-        async_sessionmaker(), LocalArtifactStore(staging_root / "unused"), staging_root, uuid4(), uuid4()
+        async_sessionmaker(),
+        LocalArtifactStore(staging_root / "unused"),
+        staging_root,
+        uuid4(),
+        uuid4(),
     )
     return service.inventory(stream, ttl)

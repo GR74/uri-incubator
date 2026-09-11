@@ -75,6 +75,26 @@ Open the local server root for the self-contained production preview. For source
 preview, open `/src/uri.html` on that server; it loads React and fonts from CDNs
 and the local JSX modules. `index.html` remains self-contained and deployable.
 
+## Local backend ingestion foundation
+
+`backend/` provides a PostgreSQL-only local service for fictional pilot records.
+Uploads are accepted into a durable queue and expose a project-authorized status
+URL; completed versions expose immutable, locator-addressable parts and seven
+independent quality dimensions. Quality is deliberately not combined into a
+score. Privacy and licensing cautions are reported separately.
+
+The ClearerMind metadata helper creates only a fictional local owner, project,
+and declared evidence-selection metadata. It never reads or imports a repository
+or conversation export. It requires explicit repository/ref/commit-range and
+conversation selections before it records that declaration.
+
+```bash
+cd backend
+uv run alembic upgrade head
+uv run python scripts/seed_clearermind_pilot.py --repository /explicit/local/path --ref main --start-commit <sha> --end-commit <sha> --conversation-id <selected-id>
+uv run pytest -q
+```
+
 ### Two things that bite when editing by hand
 
 **A stray newline inside a quoted string blanks the whole page.** Copy that spans

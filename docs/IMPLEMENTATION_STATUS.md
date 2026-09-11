@@ -1,5 +1,19 @@
 # URI Implementation Status
 
+## Backend ingestion foundation
+
+The local PostgreSQL backend now has a queued normalization slice for synthetic
+source artifacts. A worker moves a source version from queued to running to a
+terminal state; successful transactions add immutable normalized parts and one
+multidimensional quality assessment together. API status and content endpoints
+remain project-capability scoped. The assessment has seven separate dimensions
+and no overall score; privacy and licensing warnings remain distinct from those
+dimensions. The ClearerMind helper is metadata-only and does not inspect or
+import real repositories or conversation exports.
+
+This is not a production deployment and does not claim that real ClearerMind,
+ChatGPT, participant, or other private evidence has been imported.
+
 ## Current increment
 
 Implement the first connected workspace from `UX_BLUEPRINT.md`: Project Home, evidence intake, review, published record, and handoff/export. GPT-5.6 Sol workers own workspace components, evidence workflow, and CSS; the primary agent owns integration and verification.

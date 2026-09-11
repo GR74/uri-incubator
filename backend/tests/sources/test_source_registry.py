@@ -233,7 +233,7 @@ async def test_path_traversal_external_id_never_shapes_artifact_storage(
         },
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert not (tmp_path / "outside.md").exists()
     stored_files = [
         path for path in (tmp_path / "artifacts").rglob("*") if path.is_file()
@@ -258,7 +258,7 @@ async def test_cross_project_source_read_returns_not_found(
             "media_type": "text/markdown",
         },
     )
-    assert created.status_code == 201
+    assert created.status_code == 202
 
     response = await client.get(
         f"/api/projects/{source_fixture.project_id}/sources",

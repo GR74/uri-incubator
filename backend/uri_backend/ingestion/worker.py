@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
+import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from uri_backend.config import Settings
 from uri_backend.database import create_engine, session_factory
 from uri_backend.ingestion.adapters import (
     AdapterRegistry,
+    ConversationAdapter,
     DocumentAdapter,
     GitAdapter,
     LabNotebookAdapter,
@@ -21,6 +23,7 @@ from uri_backend.ingestion.adapters import (
 )
 from uri_backend.ingestion.contracts import AdapterInput
 from uri_backend.ingestion.models import IngestionRun
+from uri_backend.ingestion.quality import SourceContext, assess_source
 from uri_backend.ingestion.queue import (
     ClaimedJob,
     cancel_job,
@@ -28,7 +31,12 @@ from uri_backend.ingestion.queue import (
     complete_job,
     fail_job,
 )
-from uri_backend.sources.models import Artifact, ContentPart, SourceVersion
+from uri_backend.sources.models import (
+    Artifact,
+    ContentPart,
+    SourceQualityAssessment,
+    SourceVersion,
+)
 
 JobHandler = Callable[[ClaimedJob], Awaitable[None]]
 
@@ -68,7 +76,16 @@ class WorkerConfigurationError(RuntimeError):
 
 
 def default_adapter_registry() -> AdapterRegistry:
-    return AdapterRegistry([DocumentAdapter(), GitAdapter(), NotebookAdapter(), ManifestAdapter(), LabNotebookAdapter()])
+    return AdapterRegistry(
+        [
+            ConversationAdapter(),
+            DocumentAdapter(),
+            GitAdapter(),
+            NotebookAdapter(),
+            ManifestAdapter(),
+            LabNotebookAdapter(),
+        ]
+    )
 
 
 def build_normalization_handler(
@@ -135,6 +152,20 @@ async def persist_normalization(
             raise ValueError("Document normalization failed")
         if result.status == "unsupported":
             raise LookupError("Unsupported source adapter")
+        report = assess_source(
+            SourceContext(
+                family=version.family,
+                has_author=any(part.author_label is not None for part in result.parts),
+                has_source_time=any(
+                    part.source_time is not None for part in result.parts
+                ),
+                has_native_version=bool(version.native_version),
+                has_reproducibility_links=bool(
+                    version.metadata_.get("reproducibility_links")
+                ),
+            ),
+            result,
+        )
         session.add_all(
             [
                 ContentPart(
@@ -150,6 +181,44 @@ async def persist_normalization(
                 for part in result.parts
             ]
         )
+        session.add(
+            SourceQualityAssessment(
+                source_version_id=version.id,
+                dimensions={
+                    name: dimension.model_dump()
+                    for name, dimension in report.dimensions.items()
+                },
+                warnings=[
+                    {"category": "privacy", "message": warning}
+                    for warning in report.privacy_warnings
+                ]
+                + [
+                    {"category": "licensing", "message": warning}
+                    for warning in report.licensing_warnings
+                ],
+            )
+        )
+
+
+async def run_one_worker_job(
+    sessions: async_sessionmaker[AsyncSession],
+    *,
+    artifact_root: Path | None = None,
+    worker_id: str = "test-worker",
+) -> bool:
+    """Process one queued job for bounded integration and smoke checks."""
+    async with sessions() as session:
+        claimed = await claim_next_job(session, worker_id, lease_seconds=30)
+        await session.commit()
+    if claimed is None:
+        return False
+    try:
+        await build_normalization_handler(sessions, artifact_root)(claimed)
+    except Exception:
+        await _failure_transition(sessions, claimed.id, worker_id)
+        raise
+    await _complete_transition(sessions, claimed.id, worker_id)
+    return True
 
 
 def _artifact_path(artifact_root: Path, storage_key: str) -> Path:
@@ -241,6 +310,8 @@ async def run_configured_worker(
 
 
 def main() -> None:
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     engine = create_engine(Settings())
     try:
         asyncio.run(run_configured_worker(session_factory(engine)))

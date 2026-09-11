@@ -84,6 +84,20 @@ class SourceVersionResponse(BaseModel):
     artifact_id: UUID
 
 
+class IngestionAcceptedResponse(SourceVersionResponse):
+    status_url: str
+
+
+class IngestionStatusResponse(BaseModel):
+    id: UUID
+    source_version_id: UUID
+    status: str
+    error_code: str | None
+    error_detail: str | None
+    part_count: int
+    quality: dict[str, JsonValue] | None
+
+
 class ContentPartResponse(BaseModel):
     id: UUID
     ordinal: int

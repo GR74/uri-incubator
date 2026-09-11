@@ -22,6 +22,7 @@ from uri_backend.ingestion.adapters.git import (
     InvalidGitRange,
     UnsafeSourcePath,
 )
+from uri_backend.ingestion.models import IngestionRun
 from uri_backend.projects.models import Project, User
 from uri_backend.projects.router import ActorDep, SessionDep
 from uri_backend.projects.service import (
@@ -30,7 +31,12 @@ from uri_backend.projects.service import (
     require_capability,
 )
 from uri_backend.sources.artifacts import LocalArtifactStore
-from uri_backend.sources.models import ContentPart, Source, SourceVersion
+from uri_backend.sources.models import (
+    ContentPart,
+    Source,
+    SourceQualityAssessment,
+    SourceVersion,
+)
 from uri_backend.sources.schemas import (
     ContentPartResponse,
     ConversationPreviewResponse,
@@ -38,6 +44,8 @@ from uri_backend.sources.schemas import (
     GitPreviewResponse,
     GitRegistrationCommand,
     GitSourceCommand,
+    IngestionAcceptedResponse,
+    IngestionStatusResponse,
     RegisterSourceVersion,
     SourceResponse,
     SourceVersionResponse,
@@ -51,7 +59,9 @@ from uri_backend.sources.service import (
 router = APIRouter(prefix="/api", tags=["sources"])
 
 
-def conversation_service(request: Request, actor: User, project_id: UUID) -> ConversationService:
+def conversation_service(
+    request: Request, actor: User, project_id: UUID
+) -> ConversationService:
     services = getattr(request.app.state, "conversation_services", None)
     if services is None:
         services = {}
@@ -61,7 +71,9 @@ def conversation_service(request: Request, actor: User, project_id: UUID) -> Con
     if service is None:
         settings = request.app.state.settings
         service = ConversationService(
-            async_sessionmaker(request.app.state.database_engine, expire_on_commit=False),
+            async_sessionmaker(
+                request.app.state.database_engine, expire_on_commit=False
+            ),
             LocalArtifactStore(settings.artifact_root, settings.staging_root),
             settings.staging_root / "conversation-exports",
             actor.id,
@@ -74,7 +86,9 @@ def conversation_service(request: Request, actor: User, project_id: UUID) -> Con
 def conversation_preview_response(inventory) -> ConversationPreviewResponse:
     return ConversationPreviewResponse(
         stage_id=inventory.stage_id,
-        conversations=[item.model_dump(mode="json") for item in inventory.conversations],
+        conversations=[
+            item.model_dump(mode="json") for item in inventory.conversations
+        ],
         expires_at=inventory.expires_at,
     )
 
@@ -112,6 +126,13 @@ def version_response(version: SourceVersion) -> SourceVersionResponse:
         native_version=version.native_version,
         media_type=version.media_type,
         artifact_id=version.artifact_id,
+    )
+
+
+def ingestion_accepted_response(version: SourceVersion) -> IngestionAcceptedResponse:
+    return IngestionAcceptedResponse(
+        **version_response(version).model_dump(),
+        status_url=f"/api/projects/{version.project_id}/source-versions/{version.id}/ingestion",
     )
 
 
@@ -250,11 +271,13 @@ async def post_conversation_preview(
 ) -> ConversationPreviewResponse:
     await require_git_write(session, actor, project_id)
     try:
-        inventory = await conversation_service(request, actor, project_id).inventory_async(
-            request.stream(), timedelta(minutes=15)
-        )
+        inventory = await conversation_service(
+            request, actor, project_id
+        ).inventory_async(request.stream(), timedelta(minutes=15))
     except ConversationStageError as error:
-        raise HTTPException(status_code=422, detail="Conversation export could not be staged.") from error
+        raise HTTPException(
+            status_code=422, detail="Conversation export could not be staged."
+        ) from error
     return conversation_preview_response(inventory)
 
 
@@ -284,9 +307,13 @@ async def post_conversation_promotion(
             service=conversation_service(request, actor, project_id),
         )
     except StageExpired as error:
-        raise HTTPException(status_code=410, detail="Conversation stage has expired.") from error
+        raise HTTPException(
+            status_code=410, detail="Conversation stage has expired."
+        ) from error
     except (UnknownConversation, ConversationStageError) as error:
-        raise HTTPException(status_code=422, detail="Conversation stage could not be promoted.") from error
+        raise HTTPException(
+            status_code=422, detail="Conversation stage could not be promoted."
+        ) from error
     return [version_response(version) for version in versions]
 
 
@@ -306,25 +333,27 @@ async def delete_conversation_stage(
     try:
         conversation_service(request, actor, project_id).cancel(stage_id)
     except ConversationStageError as error:
-        raise HTTPException(status_code=500, detail="Conversation stage purge failed.") from error
+        raise HTTPException(
+            status_code=500, detail="Conversation stage purge failed."
+        ) from error
 
 
 @router.post(
     "/projects/{project_id}/sources/uploads",
-    response_model=SourceVersionResponse,
-    status_code=201,
+    response_model=IngestionAcceptedResponse,
+    status_code=202,
 )
 async def post_upload(
     project_id: UUID,
     request: Request,
     actor: ActorDep,
     session: SessionDep,
-    family: Annotated[str, Query()],
-    external_id: Annotated[str, Query()],
-    native_version: Annotated[str, Query()],
-    media_type: Annotated[str, Query()],
+    family: Annotated[str | None, Query()] = None,
+    external_id: Annotated[str | None, Query()] = None,
+    native_version: Annotated[str | None, Query()] = None,
+    media_type: Annotated[str | None, Query()] = None,
     title: Annotated[str | None, Query()] = None,
-) -> SourceVersionResponse:
+) -> IngestionAcceptedResponse:
     settings = request.app.state.settings
     try:
         await require_writable_project(session, actor, project_id)
@@ -332,9 +361,31 @@ async def post_upload(
         raise HTTPException(
             status_code=409, detail="Stashed projects are read-only."
         ) from error
+    stream = request.stream()
+    if request.headers.get("content-type", "").startswith("multipart/form-data"):
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(status_code=422, detail="A source file is required.")
+        family = str(form.get("family") or "")
+        external_id = str(form.get("external_id") or "")
+        native_version = str(form.get("native_version") or "")
+        title = str(form.get("title")) if form.get("title") is not None else title
+        media_type = str(getattr(upload, "content_type", "") or media_type or "")
+
+        async def stream_upload():
+            while chunk := await upload.read(1024 * 1024):
+                yield chunk
+
+        stream = stream_upload()
+    if not family or not external_id or not native_version or not media_type:
+        raise HTTPException(
+            status_code=422,
+            detail="Source family, identity, version, and media type are required.",
+        )
     stored = await LocalArtifactStore(
         settings.artifact_root, settings.staging_root
-    ).put_async(request.stream())
+    ).put_async(stream)
     command = RegisterSourceVersion(
         project_id=project_id,
         family=family,
@@ -349,7 +400,7 @@ async def post_upload(
         raise HTTPException(
             status_code=409, detail="Stashed projects are read-only."
         ) from error
-    return version_response(version)
+    return ingestion_accepted_response(version)
 
 
 @router.get("/projects/{project_id}/sources", response_model=list[SourceResponse])
@@ -429,3 +480,47 @@ async def get_content(
         )
         for part in parts
     ]
+
+
+@router.get(
+    "/projects/{project_id}/source-versions/{version_id}/ingestion",
+    response_model=IngestionStatusResponse,
+)
+async def get_ingestion_status(
+    project_id: UUID, version_id: UUID, actor: ActorDep, session: SessionDep
+) -> IngestionStatusResponse:
+    """Return only project-authorized operational progress and completed outputs."""
+    await require_readable(session, actor, project_id)
+    run = await session.scalar(
+        sa.select(IngestionRun)
+        .join(SourceVersion, IngestionRun.source_version_id == SourceVersion.id)
+        .where(SourceVersion.project_id == project_id, SourceVersion.id == version_id)
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="Ingestion run not found.")
+    part_count = await session.scalar(
+        sa.select(sa.func.count())
+        .select_from(ContentPart)
+        .where(ContentPart.source_version_id == version_id)
+    )
+    assessment = await session.scalar(
+        sa.select(SourceQualityAssessment).where(
+            SourceQualityAssessment.source_version_id == version_id
+        )
+    )
+    quality = None
+    if assessment is not None:
+        quality = {
+            "dimensions": assessment.dimensions,
+            "warnings": assessment.warnings,
+            "overall_score": None,
+        }
+    return IngestionStatusResponse(
+        id=run.id,
+        source_version_id=version_id,
+        status=run.status,
+        error_code=run.error_code,
+        error_detail=run.error_detail,
+        part_count=part_count or 0,
+        quality=quality,
+    )

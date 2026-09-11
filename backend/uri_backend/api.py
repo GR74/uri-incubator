@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
@@ -15,6 +16,9 @@ from uri_backend.ingestion.adapters.conversations import (
 from uri_backend.projects.router import router as projects_router
 from uri_backend.projects.service import CapabilityDenied, UnknownActor
 from uri_backend.sources.router import router as sources_router
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
