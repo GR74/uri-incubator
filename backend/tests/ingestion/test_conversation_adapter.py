@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 from datetime import timedelta
@@ -19,6 +20,8 @@ from uri_backend.ingestion.adapters.conversations import (
     ExportMalformed,
     StageExpired,
     StagePurgeFailed,
+    promote_selected_conversations,
+    purge_expired_conversation_stages,
 )
 from uri_backend.projects.models import AuditEvent, Project, ProjectMembership, User
 from uri_backend.sources.artifacts import LocalArtifactStore
@@ -260,3 +263,74 @@ async def test_preview_then_selected_promotion_never_returns_unselected_bodies(
     )
     assert promoted.status_code == 201
     assert [item["external_id"] for item in promoted.json()] == ["conv-clearermind"]
+
+
+def test_janitor_purges_expired_stage_without_a_follow_up_request(
+    conversation_service
+) -> None:
+    """An abandoned export must not wait for another client request before deletion."""
+    inventory = conversation_service.inventory(
+        io.BytesIO(synthetic_export()), ttl=timedelta(seconds=-1)
+    )
+
+    result = purge_expired_conversation_stages(conversation_service.staging_root)
+
+    assert result.purged_stage_ids == [inventory.stage_id]
+    assert result.failures == []
+    assert not inventory.staging_path.exists()
+
+
+async def test_restart_discovers_stage_and_public_promotion_interface(
+    conversation_service
+) -> None:
+    """Losing process memory must not strand a selected stage or its TTL metadata."""
+    inventory = conversation_service.inventory(io.BytesIO(synthetic_export()))
+    restarted = ConversationService(
+        conversation_service.session_factory,
+        conversation_service.artifact_store,
+        conversation_service.staging_root,
+        conversation_service.actor_id,
+        conversation_service.project_id,
+    )
+    async with restarted.session_factory() as session:
+        actor = await session.get(User, restarted.actor_id)
+        project = await session.get(Project, restarted.project_id)
+        assert actor is not None
+        assert project is not None
+        promoted = await promote_selected_conversations(
+            inventory.stage_id, ["conv-clearermind"], actor, project
+        )
+
+    assert [version.external_id for version in promoted] == ["conv-clearermind"]
+    assert not inventory.staging_path.exists()
+
+
+async def test_app_janitor_stops_cleanly_after_lifespan(tmp_path: Path) -> None:
+    """A shutdown that leaves the cleanup task alive can retain exports after app exit."""
+    app = create_app(
+        Settings(
+            database_url=None,
+            artifact_root=tmp_path / "artifacts",
+            staging_root=tmp_path / "staging",
+            conversation_stage_cleanup_seconds=1,
+        )
+    )
+    service = ConversationService(
+        async_sessionmaker(),
+        LocalArtifactStore(tmp_path / "artifacts"),
+        tmp_path / "staging" / "conversation-exports",
+        uuid4(),
+        uuid4(),
+    )
+    inventory = service.inventory(io.BytesIO(synthetic_export()), ttl=timedelta(seconds=-1))
+    async with app.router.lifespan_context(app):
+        task = app.state.conversation_stage_janitor_task
+        for _ in range(20):
+            if not inventory.staging_path.exists():
+                break
+            await asyncio.sleep(0.01)
+        assert not task.done()
+        assert not inventory.staging_path.exists()
+
+    assert task.done()
+    assert task.cancelled()

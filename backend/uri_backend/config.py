@@ -19,3 +19,4 @@ class Settings(BaseSettings):
     job_max_attempts: int = 3
     pilot_mode: bool = False
     approved_git_repository_roots: dict[str, list[Path]] = Field(default_factory=dict)
+    conversation_stage_cleanup_seconds: int = 30

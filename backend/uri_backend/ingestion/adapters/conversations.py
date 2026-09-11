@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, ClassVar
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -62,6 +62,12 @@ class StagedConversationInventory(BaseModel):
     conversations: list[ConversationInventoryItem]
     expires_at: datetime
     staging_path: Path
+
+
+@dataclass(frozen=True)
+class StageCleanupResult:
+    purged_stage_ids: list[str]
+    failures: list[str]
 
 
 @dataclass(frozen=True)
@@ -193,6 +199,8 @@ def _parse_export(raw: bytes) -> tuple[list[dict[str, object]], list[Conversatio
 
 
 class ConversationService:
+    _services: ClassVar[dict[tuple[UUID, UUID], ConversationService]] = {}
+
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
@@ -207,6 +215,7 @@ class ConversationService:
         self.actor_id = actor_id
         self.project_id = project_id
         self._stages: dict[str, _Stage] = {}
+        self._services[(actor_id, project_id)] = self
 
     def inventory(
         self, stream: BinaryIO, ttl: timedelta = timedelta(minutes=15)
@@ -274,11 +283,57 @@ class ConversationService:
             expires_at=datetime.now(UTC) + ttl,
             staging_path=staging_path,
         )
-        self._stages[stage_id] = _Stage(inventory, digest.hexdigest())
+        stage = _Stage(inventory, digest.hexdigest())
+        self._write_manifest(stage)
+        self._stages[stage_id] = stage
         return inventory
 
+    def _write_manifest(self, stage: _Stage) -> None:
+        manifest_path = stage.inventory.staging_path / "stage.json"
+        payload = {
+            "stage_id": stage.inventory.stage_id,
+            "actor_id": str(self.actor_id),
+            "project_id": str(self.project_id),
+            "expires_at": stage.inventory.expires_at.isoformat(),
+            "source_export_sha256": stage.export_hash,
+            "conversations": [item.model_dump(mode="json") for item in stage.inventory.conversations],
+        }
+        with manifest_path.open("x", encoding="utf-8") as output:
+            os.chmod(manifest_path, 0o600)
+            json.dump(payload, output, ensure_ascii=True, separators=(",", ":"))
+            output.flush()
+            os.fsync(output.fileno())
+
+    def _stage(self, stage_id: str) -> _Stage | None:
+        cached = self._stages.get(stage_id)
+        if cached is not None:
+            return cached
+        if Path(stage_id).name != stage_id:
+            return None
+        staging_path = self.staging_root / stage_id
+        manifest_path = staging_path / "stage.json"
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if (
+                payload["stage_id"] != stage_id
+                or UUID(payload["actor_id"]) != self.actor_id
+                or UUID(payload["project_id"]) != self.project_id
+            ):
+                return None
+            inventory = StagedConversationInventory(
+                stage_id=stage_id,
+                conversations=[ConversationInventoryItem.model_validate(item) for item in payload["conversations"]],
+                expires_at=datetime.fromisoformat(payload["expires_at"]),
+                staging_path=staging_path,
+            )
+            stage = _Stage(inventory, str(payload["source_export_sha256"]))
+            self._stages[stage_id] = stage
+            return stage
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+
     def cancel(self, stage_id: str) -> None:
-        stage = self._stages.get(stage_id)
+        stage = self._stage(stage_id)
         if stage is not None:
             self._purge_path(stage.inventory.staging_path)
             self._stages.pop(stage_id, None)
@@ -286,7 +341,7 @@ class ConversationService:
     async def promote(
         self, stage_id: str, conversation_ids: list[str]
     ) -> list[SourceVersion]:
-        stage = self._stages.get(stage_id)
+        stage = self._stage(stage_id)
         if stage is None:
             raise UnknownConversation("Conversation stage was not found.")
         if datetime.now(UTC) >= stage.inventory.expires_at:
@@ -381,6 +436,41 @@ def _timestamp_json(value: object) -> str | None:
     if isinstance(value, datetime):
         return value.isoformat()
     return _safe_datetime(value).isoformat()
+
+
+def purge_expired_conversation_stages(staging_root: Path) -> StageCleanupResult:
+    """Purge expired or unreadable stage directories without exposing export contents."""
+    purged: list[str] = []
+    failures: list[str] = []
+    if not staging_root.exists():
+        return StageCleanupResult(purged, failures)
+    for staging_path in staging_root.iterdir():
+        if not staging_path.is_dir():
+            continue
+        try:
+            payload = json.loads((staging_path / "stage.json").read_text(encoding="utf-8"))
+            expires_at = datetime.fromisoformat(payload["expires_at"])
+            expired = datetime.now(UTC) >= expires_at
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            expired = True
+        if not expired:
+            continue
+        try:
+            shutil.rmtree(staging_path)
+            purged.append(staging_path.name)
+        except OSError:
+            failures.append(staging_path.name)
+    return StageCleanupResult(purged, failures)
+
+
+async def promote_selected_conversations(
+    stage_id: str, conversation_ids: list[str], actor: User, project: Project
+) -> list[SourceVersion]:
+    """Promote an explicitly selected durable stage for its authorized actor/project."""
+    service = ConversationService._services.get((actor.id, project.id))
+    if service is None:
+        raise UnknownConversation("Conversation stage was not found.")
+    return await service.promote(stage_id, conversation_ids)
 
 
 def stage_conversation_export(

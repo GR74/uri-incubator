@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -8,6 +9,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from uri_backend.config import Settings
 from uri_backend.database import create_engine
 from uri_backend.errors import URIBackendError
+from uri_backend.ingestion.adapters.conversations import (
+    purge_expired_conversation_stages,
+)
 from uri_backend.projects.router import router as projects_router
 from uri_backend.projects.service import CapabilityDenied, UnknownActor
 from uri_backend.sources.router import router as sources_router
@@ -21,9 +25,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.database_engine = (
             create_engine(resolved) if resolved.database_url is not None else None
         )
+        async def janitor() -> None:
+            while True:
+                result = await asyncio.to_thread(
+                    purge_expired_conversation_stages,
+                    resolved.staging_root / "conversation-exports",
+                )
+                if result.failures:
+                    app.state.conversation_stage_cleanup_failures = result.failures
+                await asyncio.sleep(max(1, resolved.conversation_stage_cleanup_seconds))
+
+        app.state.conversation_stage_cleanup_failures = []
+        app.state.conversation_stage_janitor_task = asyncio.create_task(janitor())
         try:
             yield
         finally:
+            app.state.conversation_stage_janitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.conversation_stage_janitor_task
             if app.state.database_engine is not None:
                 await app.state.database_engine.dispose()
 
