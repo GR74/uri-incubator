@@ -16,3 +16,4 @@ class Settings(BaseSettings):
     job_lease_seconds: int = 30
     job_poll_interval_seconds: float = 1.0
     job_max_attempts: int = 3
+    pilot_mode: bool = False

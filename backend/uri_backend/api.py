@@ -1,12 +1,15 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from uri_backend.config import Settings
 from uri_backend.database import create_engine
+from uri_backend.errors import URIBackendError
+from uri_backend.projects.router import router as projects_router
+from uri_backend.projects.service import CapabilityDenied, UnknownActor
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -25,6 +28,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="URI Research Backend", version="0.1.0", lifespan=lifespan)
     app.state.settings = resolved
+    app.include_router(projects_router)
+
+    @app.exception_handler(UnknownActor)
+    async def unknown_actor_handler(_: Request, __: UnknownActor) -> JSONResponse:
+        return JSONResponse(
+            status_code=401, content={"error": {"code": "unknown_actor"}}
+        )
+
+    @app.exception_handler(CapabilityDenied)
+    async def capability_denied_handler(
+        _: Request, __: CapabilityDenied
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=403, content={"error": {"code": "capability_denied"}}
+        )
+
+    @app.exception_handler(URIBackendError)
+    async def backend_error_handler(_: Request, __: URIBackendError) -> JSONResponse:
+        return JSONResponse(
+            status_code=400, content={"error": {"code": "backend_error"}}
+        )
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
