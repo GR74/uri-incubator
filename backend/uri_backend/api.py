@@ -17,9 +17,6 @@ from uri_backend.projects.router import router as projects_router
 from uri_backend.projects.service import CapabilityDenied, UnknownActor
 from uri_backend.sources.router import router as sources_router
 
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings()
@@ -104,3 +101,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 app = create_app()
+
+
+def main() -> None:
+    """Start Uvicorn after selecting Psycopg-compatible Windows event-loop policy."""
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    import uvicorn
+
+    uvicorn.run("uri_backend.api:app", host="127.0.0.1", port=8000, loop="none")

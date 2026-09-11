@@ -91,9 +91,14 @@ conversation selections before it records that declaration.
 ```bash
 cd backend
 uv run alembic upgrade head
+uv run uri-api
 uv run python scripts/seed_clearermind_pilot.py --repository /explicit/local/path --ref main --start-commit <sha> --end-commit <sha> --conversation-id <selected-id>
 uv run pytest -q
 ```
+
+On Windows, use `uv run uri-api` for the local API rather than calling Uvicorn
+directly without reload. The launcher selects the event loop required by the
+PostgreSQL async driver before the server starts.
 
 ### Two things that bite when editing by hand
 

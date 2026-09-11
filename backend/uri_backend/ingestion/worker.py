@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from uri_backend.config import Settings
@@ -181,8 +182,9 @@ async def persist_normalization(
                 for part in result.parts
             ]
         )
-        session.add(
-            SourceQualityAssessment(
+        assessment_id = await session.scalar(
+            pg_insert(SourceQualityAssessment)
+            .values(
                 source_version_id=version.id,
                 dimensions={
                     name: dimension.model_dump()
@@ -197,7 +199,16 @@ async def persist_normalization(
                     for warning in report.licensing_warnings
                 ],
             )
+            .on_conflict_do_nothing(constraint="uq_source_quality_assessment_version")
+            .returning(SourceQualityAssessment.id)
         )
+        if assessment_id is None:
+            assessment_id = await session.scalar(
+                sa.select(SourceQualityAssessment.id).where(
+                    SourceQualityAssessment.source_version_id == version.id
+                )
+            )
+        assert assessment_id is not None
 
 
 async def run_one_worker_job(

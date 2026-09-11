@@ -24,6 +24,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
+uri-api = "uri_backend.api:main"
 uri-worker = "uri_backend.ingestion.worker:main"
 
 [dependency-groups]

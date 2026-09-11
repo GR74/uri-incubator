@@ -504,9 +504,10 @@ async def get_ingestion_status(
         .where(ContentPart.source_version_id == version_id)
     )
     assessment = await session.scalar(
-        sa.select(SourceQualityAssessment).where(
-            SourceQualityAssessment.source_version_id == version_id
-        )
+        sa.select(SourceQualityAssessment)
+        .where(SourceQualityAssessment.source_version_id == version_id)
+        .order_by(SourceQualityAssessment.created_at, SourceQualityAssessment.id)
+        .limit(1)
     )
     quality = None
     if assessment is not None:

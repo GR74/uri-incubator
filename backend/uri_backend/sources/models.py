@@ -67,6 +67,11 @@ class ContentPart(Base):
 
 class SourceQualityAssessment(Base):
     __tablename__ = "source_quality_assessments"
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "source_version_id", name="uq_source_quality_assessment_version"
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)
     source_version_id: Mapped[UUID] = mapped_column(sa.ForeignKey("source_versions.id"), nullable=False)

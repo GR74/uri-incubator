@@ -20,7 +20,12 @@ from uri_backend.ingestion.contracts import (
     NormalizedPart,
 )
 from uri_backend.ingestion.models import IngestionJob, IngestionRun
-from uri_backend.ingestion.queue import ClaimedJob, enqueue_ingestion
+from uri_backend.ingestion.queue import (
+    ClaimedJob,
+    claim_next_job,
+    complete_job,
+    enqueue_ingestion,
+)
 from uri_backend.ingestion.worker import (
     build_default_dispatcher,
     default_adapter_registry,
@@ -28,7 +33,13 @@ from uri_backend.ingestion.worker import (
     run_worker,
 )
 from uri_backend.projects.models import Project, ProjectMembership, User
-from uri_backend.sources.models import Artifact, ContentPart, Source, SourceVersion
+from uri_backend.sources.models import (
+    Artifact,
+    ContentPart,
+    Source,
+    SourceQualityAssessment,
+    SourceVersion,
+)
 
 DOCUMENT_FIXTURES = Path(__file__).parents[1] / "fixtures" / "document"
 MEDIA_TYPES = {
@@ -260,6 +271,54 @@ async def test_retry_replaces_only_unpublished_parts_for_its_same_run(document_r
         "URI document heading",
         "First fictional research note.\nSecond fictional research note.",
     ]
+
+
+@pytest.mark.skipif(
+    not os.environ.get("URI_TEST_DATABASE_URL"),
+    reason="requires explicitly configured isolated PostgreSQL",
+)
+async def test_crash_after_normalization_reuses_one_immutable_quality_assessment(
+    document_run,
+) -> None:
+    """A recovered lease must not append a second immutable quality report."""
+    factory, artifact_root, run = document_run
+    async with factory() as session:
+        first = await claim_next_job(session, "worker-before-crash", lease_seconds=30)
+        await session.commit()
+    assert first is not None
+    await persist_normalization(
+        factory, first, artifact_root, default_adapter_registry()
+    )
+    async with factory() as session:
+        await session.execute(
+            sa.update(IngestionJob)
+            .where(IngestionJob.id == first.id)
+            .values(lease_expires_at=sa.func.now() - sa.text("interval '1 second'"))
+        )
+        await session.commit()
+    async with factory() as session:
+        retry = await claim_next_job(session, "worker-after-crash", lease_seconds=30)
+        await session.commit()
+    assert retry is not None and retry.attempt == 2
+    await persist_normalization(
+        factory, retry, artifact_root, default_adapter_registry()
+    )
+    async with factory() as session:
+        await complete_job(session, retry.id, "worker-after-crash")
+        await session.commit()
+        assessments = await session.scalars(
+            sa.select(SourceQualityAssessment).where(
+                SourceQualityAssessment.source_version_id == run.source_version_id
+            )
+        )
+        parts = await session.scalars(
+            sa.select(ContentPart).where(
+                ContentPart.source_version_id == run.source_version_id
+            )
+        )
+
+    assert len(list(assessments)) == 1
+    assert len(list(parts)) == 2
 
 
 @pytest.mark.skipif(
