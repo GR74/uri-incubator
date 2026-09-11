@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from uri_backend.ingestion.adapters.base import AdapterRegistry
 from uri_backend.ingestion.adapters.conversations import (
     ConversationService,
     ConversationStageError,
@@ -16,12 +17,17 @@ from uri_backend.ingestion.adapters.conversations import (
     UnknownConversation,
     promote_selected_conversations,
 )
+from uri_backend.ingestion.adapters.documents import DocumentAdapter
 from uri_backend.ingestion.adapters.git import (
     GIT_MANIFEST_MEDIA_TYPE,
     GitAdapter,
     InvalidGitRange,
     UnsafeSourcePath,
 )
+from uri_backend.ingestion.adapters.lab_notebooks import LabNotebookAdapter
+from uri_backend.ingestion.adapters.manifests import ManifestAdapter
+from uri_backend.ingestion.adapters.notebooks import NotebookAdapter
+from uri_backend.ingestion.contracts import AdapterInput
 from uri_backend.ingestion.models import IngestionRun
 from uri_backend.projects.models import Project, User
 from uri_backend.projects.router import ActorDep, SessionDep
@@ -57,6 +63,11 @@ from uri_backend.sources.service import (
 )
 
 router = APIRouter(prefix="/api", tags=["sources"])
+
+GENERIC_ADAPTERS = AdapterRegistry(
+    [DocumentAdapter(), NotebookAdapter(), ManifestAdapter(), LabNotebookAdapter()]
+)
+RESERVED_GENERIC_FAMILIES = frozenset({"conversation", "git"})
 
 
 def conversation_service(
@@ -383,9 +394,38 @@ async def post_upload(
             status_code=422,
             detail="Source family, identity, version, and media type are required.",
         )
-    stored = await LocalArtifactStore(
-        settings.artifact_root, settings.staging_root
-    ).put_async(stream)
+    if family in RESERVED_GENERIC_FAMILIES:
+        raise HTTPException(
+            status_code=422,
+            detail="This source family must use its scoped ingestion route.",
+        )
+    try:
+        adapter = GENERIC_ADAPTERS.resolve(family, media_type)
+    except LookupError as error:
+        raise HTTPException(
+            status_code=422, detail="Unsupported source family or media type."
+        ) from error
+    store = LocalArtifactStore(settings.artifact_root, settings.staging_root)
+    try:
+        quarantined = await store.stage_async(
+            stream, max_bytes=settings.generic_upload_max_bytes
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="Source upload was not accepted.") from error
+    try:
+        preflight = adapter.normalize(
+            AdapterInput(
+                artifact_path=quarantined.path,
+                family=family,
+                media_type=media_type,
+            )
+        )
+        if preflight.status in {"failed", "unsupported"}:
+            raise HTTPException(status_code=422, detail="Source upload was not accepted.")
+        stored = store.promote(quarantined)
+    except BaseException:
+        store.purge(quarantined)
+        raise
     command = RegisterSourceVersion(
         project_id=project_id,
         family=family,

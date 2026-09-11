@@ -17,6 +17,7 @@ from uri_backend.ingestion.contracts import (
     NormalizationWarning,
     NormalizedPart,
 )
+from uri_backend.ingestion.privacy import contains_participant_rows
 
 ELN_MEDIA_TYPES = frozenset({"application/json", "text/csv", "text/markdown", "text/x-markdown", "text/html", "application/pdf"})
 MAX_BYTES = 8 * 1024 * 1024
@@ -46,6 +47,7 @@ class LabNotebookAdapter:
     def _json(self, text: str) -> NormalizationResult:
         payload: Any = json.loads(text)
         self._nesting(payload)
+        if contains_participant_rows(payload): return self._failed("participant_data_disallowed", "Participant-row-like data is not allowed in lab records.")
         entries = payload if isinstance(payload, list) else [payload]
         if not all(isinstance(entry, dict) for entry in entries) or len(entries) > MAX_ROWS: return self._failed("invalid_eln_shape", "ELN JSON has an unsupported shape.")
         parts: list[NormalizedPart] = []
@@ -71,6 +73,7 @@ class LabNotebookAdapter:
         parts: list[NormalizedPart] = []
         counters: dict[str, dict[str, int]] = {}
         for row_number, row in enumerate(rows, start=1):
+            if contains_participant_rows(row): return self._failed("participant_data_disallowed", "Participant-row-like data is not allowed in lab records.")
             entry_id = row.get("entry_id") or row.get("record_id") or row.get("id") or str(row_number)
             common = self._entry_metadata(row)
             entry_counters = counters.setdefault(

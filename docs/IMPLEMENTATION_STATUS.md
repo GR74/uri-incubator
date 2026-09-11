@@ -14,6 +14,11 @@ import real repositories or conversation exports.
 This is not a production deployment and does not claim that real ClearerMind,
 ChatGPT, participant, or other private evidence has been imported.
 
+Generic backend uploads are first written to a bounded owner-only quarantine
+file, then validated by a fail-closed family/media adapter and privacy preflight
+before content-addressed artifact publication. Conversation exports and Git use
+their scoped intake routes rather than generic upload.
+
 ## Current increment
 
 Implement the first connected workspace from `UX_BLUEPRINT.md`: Project Home, evidence intake, review, published record, and handoff/export. GPT-5.6 Sol workers own workspace components, evidence workflow, and CSS; the primary agent owns integration and verification.

@@ -20,3 +20,4 @@ class Settings(BaseSettings):
     pilot_mode: bool = False
     approved_git_repository_roots: dict[str, list[Path]] = Field(default_factory=dict)
     conversation_stage_cleanup_seconds: int = 30
+    generic_upload_max_bytes: int = 16 * 1024 * 1024

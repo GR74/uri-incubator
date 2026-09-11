@@ -14,6 +14,7 @@ from uri_backend.ingestion.contracts import (
     NormalizationWarning,
     NormalizedPart,
 )
+from uri_backend.ingestion.privacy import contains_participant_rows
 
 NOTEBOOK_MEDIA_TYPES = frozenset({"application/x-ipynb+json", "application/vnd.jupyter.notebook+json"})
 RUN_MEDIA_TYPES = frozenset({"application/json", "text/csv"})
@@ -73,6 +74,8 @@ class NotebookAdapter:
             self._nesting(payload)
             if not isinstance(payload, dict):
                 return self._failed("invalid_run_shape", "Run JSON must be an object.")
+            if contains_participant_rows(payload):
+                return self._failed("participant_data_disallowed", "Participant-row-like data is not allowed in run records.")
             return self._run_part(payload, {"run": 1})
         rows = list(csv.DictReader(raw.decode("utf-8").splitlines()))
         if len(rows) > MAX_ROWS:
@@ -84,6 +87,8 @@ class NotebookAdapter:
                 for key, value in row.items()
                 if key is not None and value is not None
             }
+            if contains_participant_rows(row):
+                return self._failed("participant_data_disallowed", "Participant-row-like data is not allowed in run records.")
             result = self._run_part(row, {"row": row_number}, ordinal=row_number)
             parts.extend(result.parts)
         return self._result("normalized", parts, [], 1.0 if rows else 0.0)

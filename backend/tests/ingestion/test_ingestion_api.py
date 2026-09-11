@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
+import pytest
 import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -100,3 +101,168 @@ async def test_uploaded_markdown_reaches_normalized_terminal_state(
     assert status.json()["status"] == "succeeded"
     assert status.json()["part_count"] == 2
     assert status.json()["quality"]["overall_score"] is None
+
+
+@pytest.mark.parametrize(
+    ("family", "media_type", "payload"),
+    [
+        (
+            "reference_manifest",
+            "application/json",
+            b'{"records":[{"participant_id":"PRIVATE-MARKER-001","age":19}]}',
+        ),
+        (
+            "notebook_run",
+            "application/json",
+            b'{"metrics":{"participant_id":"PRIVATE-MARKER-002","score":1}}',
+        ),
+    ],
+)
+async def test_generic_participant_rows_are_rejected_before_durable_storage(
+    client: httpx.AsyncClient,
+    pilot_owner: User,
+    pilot_project: Project,
+    family: str,
+    media_type: str,
+    payload: bytes,
+) -> None:
+    """Privacy-rejected upload bytes must never reach artifacts or PostgreSQL."""
+    response = await client.post(
+        f"/api/projects/{pilot_project.id}/sources/uploads",
+        headers={"X-URI-User-ID": str(pilot_owner.id)},
+        content=payload,
+        params={
+            "family": family,
+            "external_id": "private-input.json",
+            "native_version": "v1",
+            "media_type": media_type,
+        },
+    )
+
+    assert response.status_code == 422
+    root = client._transport.app.state.settings.artifact_root.parent
+    assert all(
+        b"PRIVATE-MARKER" not in path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    )
+    async with async_sessionmaker(client._transport.app.state.database_engine)() as session:
+        assert await session.scalar(sa.text("SELECT count(*) FROM artifacts")) == 0
+        assert await session.scalar(sa.text("SELECT count(*) FROM source_versions")) == 0
+        assert await session.scalar(sa.text("SELECT count(*) FROM ingestion_runs")) == 0
+
+
+@pytest.mark.parametrize(
+    ("family", "media_type"),
+    [("conversation", "application/json"), ("git", "application/json"), ("unknown", "text/plain")],
+)
+async def test_generic_upload_fails_closed_for_reserved_or_unknown_family(
+    client: httpx.AsyncClient,
+    pilot_owner: User,
+    pilot_project: Project,
+    family: str,
+    media_type: str,
+) -> None:
+    response = await client.post(
+        f"/api/projects/{pilot_project.id}/sources/uploads",
+        headers={"X-URI-User-ID": str(pilot_owner.id)},
+        content=b"PRIVATE-MARKER-RESERVED",
+        params={
+            "family": family,
+            "external_id": "input",
+            "native_version": "v1",
+            "media_type": media_type,
+        },
+    )
+
+    assert response.status_code == 422
+    root = client._transport.app.state.settings.artifact_root.parent
+    assert not any(path.is_file() for path in root.rglob("*"))
+
+
+async def test_parse_failure_purges_generic_upload_quarantine(
+    client: httpx.AsyncClient, pilot_owner: User, pilot_project: Project
+) -> None:
+    response = await client.post(
+        f"/api/projects/{pilot_project.id}/sources/uploads",
+        headers={"X-URI-User-ID": str(pilot_owner.id)},
+        content=b"\xffPRIVATE-MARKER-PARSE",
+        params={
+            "family": "document",
+            "external_id": "broken.md",
+            "native_version": "v1",
+            "media_type": "text/markdown",
+        },
+    )
+
+    assert response.status_code == 422
+    root = client._transport.app.state.settings.artifact_root.parent
+    assert not any(path.is_file() for path in root.rglob("*"))
+
+
+async def test_interrupted_generic_upload_purges_quarantine(
+    client: httpx.AsyncClient, pilot_owner: User, pilot_project: Project
+) -> None:
+    async def interrupted():
+        yield b"PRIVATE-MARKER-INTERRUPTED"
+        raise OSError("synthetic interrupted upload")
+
+    with pytest.raises(OSError, match="synthetic interrupted upload"):
+        await client.post(
+            f"/api/projects/{pilot_project.id}/sources/uploads",
+            headers={"X-URI-User-ID": str(pilot_owner.id)},
+            content=interrupted(),
+            params={
+                "family": "document",
+                "external_id": "interrupted.md",
+                "native_version": "v1",
+                "media_type": "text/markdown",
+            },
+        )
+
+    root = client._transport.app.state.settings.artifact_root.parent
+    assert not any(path.is_file() for path in root.rglob("*"))
+
+
+@pytest.mark.parametrize(
+    ("family", "media_type", "payload"),
+    [
+        ("notebook_run", "application/json", b'{"metrics":{"accuracy":0}}'),
+        (
+            "reference_manifest",
+            "application/json",
+            b'{"accession":"synthetic-accession","cohort_summary":{"n":10}}',
+        ),
+        (
+            "lab_notebook",
+            "application/json",
+            b'{"entry_id":"synthetic-entry","sections":[{"text":"Calibrated instrument."}]}',
+        ),
+    ],
+)
+async def test_valid_generic_source_publishes_one_version_and_queue(
+    client: httpx.AsyncClient,
+    pilot_owner: User,
+    pilot_project: Project,
+    family: str,
+    media_type: str,
+    payload: bytes,
+) -> None:
+    response = await client.post(
+        f"/api/projects/{pilot_project.id}/sources/uploads",
+        headers={"X-URI-User-ID": str(pilot_owner.id)},
+        content=payload,
+        params={
+            "family": family,
+            "external_id": f"{family}.json",
+            "native_version": "v1",
+            "media_type": media_type,
+        },
+    )
+
+    assert response.status_code == 202
+    async with async_sessionmaker(client._transport.app.state.database_engine)() as session:
+        assert await session.scalar(
+            sa.text("SELECT count(*) FROM source_versions")
+        ) == 1
+        assert await session.scalar(sa.text("SELECT count(*) FROM ingestion_runs")) == 1

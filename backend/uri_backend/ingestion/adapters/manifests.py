@@ -14,6 +14,7 @@ from uri_backend.ingestion.contracts import (
     NormalizationWarning,
     NormalizedPart,
 )
+from uri_backend.ingestion.privacy import contains_participant_rows
 
 MANIFEST_MEDIA_TYPES = frozenset({"application/json", "application/yaml", "text/yaml", "application/x-yaml"})
 BIB_MEDIA_TYPES = frozenset({"application/x-bibtex", "application/x-research-info-systems"})
@@ -39,7 +40,7 @@ class ManifestAdapter:
             if context.media_type == "application/x-research-info-systems": return self._ris(text)
             payload = json.loads(text) if context.media_type == "application/json" else yaml.safe_load(text)
             self._nesting(payload)
-            if self._participant_rows(payload): return self._failed("participant_data_disallowed", "Participant-row-like data is not allowed in manifests.")
+            if contains_participant_rows(payload): return self._failed("participant_data_disallowed", "Participant-row-like data is not allowed in manifests.")
             if not isinstance(payload, dict): return self._failed("invalid_manifest_shape", "Manifest must be an object.")
             metadata = {key: payload[key] for key in ALLOWLIST if key in payload}
             locator = {"accession": str(metadata["accession"])} if "accession" in metadata else {"manifest": 1}
@@ -66,25 +67,6 @@ class ManifestAdapter:
             parts.append(NormalizedPart(ordinal=ordinal, kind="bibliographic_reference", text=json.dumps(fields, ensure_ascii=True, sort_keys=True), locator={"citation_key": key}, metadata={"citation_key": key, "fields": fields}))
         return self._result("normalized", parts, [], 1.0 if parts else 0.0)
 
-    def _participant_rows(self, value: Any, container: str = "") -> bool:
-        if isinstance(value, dict):
-            fields = {_field_name(key) for key in value}
-            has_person_identifier = any(_is_person_identifier_field(field) for field in fields)
-            has_row_measurement = any(
-                re.search(r"(?:age|gender|sex|measure|metric|score|trial|condition|session|response|outcome|value)", field)
-                for field in fields
-            )
-            if has_person_identifier and has_row_measurement:
-                return True
-            return any(self._participant_rows(child, str(key)) for key, child in value.items())
-        if isinstance(value, list):
-            records = [item for item in value if isinstance(item, dict)]
-            obvious_table = _field_name(container) in {"row", "rows", "record", "records", "table", "tables", "participant", "participants", "subject", "subjects", "patient", "patients"}
-            if obvious_table and records and any(self._participant_rows(item, container) for item in records):
-                return True
-            return any(self._participant_rows(item, container) for item in records)
-        return False
-
     def _nesting(self, value: Any, depth: int = 0) -> None:
         if depth > MAX_NESTING: raise ValueError("nesting limit")
         if isinstance(value, dict):
@@ -94,15 +76,3 @@ class ManifestAdapter:
 
     def _failed(self, code: str, message: str) -> NormalizationResult: return self._result("failed", [], [NormalizationWarning(code=code, message=message)], 0.0)
     def _result(self, status: str, parts: list[NormalizedPart], warnings: list[NormalizationWarning], coverage: float) -> NormalizationResult: return NormalizationResult(adapter=self.name, adapter_version=self.version, status=status, parts=parts, warnings=warnings, parse_coverage=coverage)
-
-
-def _field_name(value: object) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", str(value).lower()).strip("_")
-
-
-def _is_person_identifier_field(field: str) -> bool:
-    tokens = field.split("_")
-    person_tokens = {"participant", "person", "subject", "patient"}
-    if field in person_tokens:
-        return True
-    return bool(person_tokens.intersection(tokens)) and tokens[-1] in {"id", "identifier", "code"}

@@ -17,6 +17,13 @@ class StoredArtifact:
     byte_size: int
 
 
+@dataclass(frozen=True)
+class QuarantinedArtifact:
+    path: Path
+    sha256: str
+    byte_size: int
+
+
 class ArtifactStore(Protocol):
     def put(self, stream: BinaryIO) -> StoredArtifact: ...
 
@@ -45,7 +52,7 @@ class LocalArtifactStore:
                     byte_size += len(chunk)
                     staged.write(chunk)
                 self._sync(staged)
-            self._publish(staged_name, digest)
+            self._publish(staged_name, digest.hexdigest())
             staged_name = None
             return self._stored_artifact(digest, byte_size)
         finally:
@@ -54,35 +61,61 @@ class LocalArtifactStore:
 
     async def put_async(self, stream: AsyncIterator[bytes]) -> StoredArtifact:
         """Stage an ASGI request stream without accumulating its complete body."""
+        quarantined = await self.stage_async(stream)
+        try:
+            return self.promote(quarantined)
+        except BaseException:
+            self.purge(quarantined)
+            raise
+
+    async def stage_async(
+        self, stream: AsyncIterator[bytes], max_bytes: int = 16 * 1024 * 1024
+    ) -> QuarantinedArtifact:
+        """Write a bounded request stream to owner-only quarantine without publishing it."""
         self.staging_root.mkdir(parents=True, exist_ok=True)
+        quarantine_root = self.staging_root / "quarantine"
+        quarantine_root.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256()
         byte_size = 0
         staged_name: str | None = None
         try:
             with tempfile.NamedTemporaryFile(
-                mode="wb", dir=self.staging_root, prefix="upload-", delete=False
+                mode="wb", dir=quarantine_root, prefix="upload-", delete=False
             ) as staged:
                 staged_name = staged.name
+                os.chmod(staged_name, 0o600)
                 async for incoming in stream:
                     for offset in range(0, len(incoming), 1024 * 1024):
                         chunk = incoming[offset : offset + 1024 * 1024]
                         digest.update(chunk)
                         byte_size += len(chunk)
+                        if byte_size > max_bytes:
+                            raise ValueError("Upload exceeds the configured size limit.")
                         staged.write(chunk)
                 self._sync(staged)
-            self._publish(staged_name, digest)
             staged_name = None
-            return self._stored_artifact(digest, byte_size)
+            return QuarantinedArtifact(Path(staged.name), digest.hexdigest(), byte_size)
         finally:
             if staged_name is not None:
                 Path(staged_name).unlink(missing_ok=True)
+
+    def promote(self, quarantined: QuarantinedArtifact) -> StoredArtifact:
+        """Atomically publish a previously validated quarantine file by its hash."""
+        self._publish(quarantined.path, quarantined.sha256)
+        return StoredArtifact(
+            quarantined.sha256,
+            f"{quarantined.sha256[:2]}/{quarantined.sha256[2:]}",
+            quarantined.byte_size,
+        )
+
+    def purge(self, quarantined: QuarantinedArtifact) -> None:
+        quarantined.path.unlink(missing_ok=True)
 
     def _sync(self, staged: BinaryIO) -> None:
         staged.flush()
         os.fsync(staged.fileno())
 
-    def _publish(self, staged_name: str, digest: hashlib._Hash) -> None:
-        sha256 = digest.hexdigest()
+    def _publish(self, staged_name: str | Path, sha256: str) -> None:
         destination = self.root / sha256[:2] / sha256[2:]
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists():
