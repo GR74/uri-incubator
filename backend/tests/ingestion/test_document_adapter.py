@@ -155,7 +155,9 @@ async def document_run(db_engine: AsyncEngine, tmp_path: Path):
     not os.environ.get("URI_TEST_DATABASE_URL"),
     reason="requires explicitly configured isolated PostgreSQL",
 )
-async def test_normalization_worker_persists_ordered_parts_atomically(document_run) -> None:
+async def test_normalization_worker_persists_ordered_parts_atomically(
+    clean_document_tables, document_run
+) -> None:
     """Skipping the worker write leaves a completed source with no auditable content parts."""
     factory, artifact_root, run = document_run
     dispatcher = build_default_dispatcher(factory, artifact_root)
