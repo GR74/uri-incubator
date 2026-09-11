@@ -109,9 +109,10 @@ async def conversation_service(db_engine: AsyncEngine, tmp_path: Path):
             [
                 User(id=actor_id, display_name="Conversation tester", is_pilot_actor=True),
                 Project(id=project_id, name="Conversation project"),
-                ProjectMembership(user_id=actor_id, project_id=project_id, role="owner"),
             ]
         )
+        await session.flush()
+        session.add(ProjectMembership(user_id=actor_id, project_id=project_id, role="owner"))
         await session.commit()
     return ConversationService(
         factory,
