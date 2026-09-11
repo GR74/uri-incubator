@@ -12,6 +12,7 @@ from uri_backend.ingestion.models import IngestionJob, IngestionJobAttempt, Inge
 
 MAX_ERROR_DETAIL = 1000
 SAFE_ERROR_DETAILS = frozenset({"Worker lease expired", "Worker handler failed"})
+SAFE_ERROR_CODES = frozenset({"cancelled", "handler_error", "lease_expired", "parse_error"})
 
 
 class JobLeaseLost(Exception):
@@ -33,6 +34,10 @@ def _bounded_detail(detail: str | None) -> str | None:
     if normalized in SAFE_ERROR_DETAILS:
         return normalized
     return "Error detail redacted"
+
+
+def _safe_error_code(code: str) -> str:
+    return code if code in SAFE_ERROR_CODES else "internal_error"
 
 
 async def enqueue_ingestion(session: AsyncSession, source_version_id: UUID, idempotency_key: str) -> IngestionRun:
@@ -124,9 +129,10 @@ async def complete_job(session: AsyncSession, job_id: UUID, worker_id: str) -> I
 
 async def fail_job(session: AsyncSession, job_id: UUID, worker_id: str, error_code: str, error_detail: str | None = None) -> IngestionJob:
     job, now, detail = await _owned_job(session, job_id, worker_id), sa.func.now(), _bounded_detail(error_detail)
+    safe_code = _safe_error_code(error_code)
     terminal = job.attempt >= job.max_attempts
-    await _finish_attempt(session, job, "failed" if terminal else "retry", error_code, detail)
-    job.error_code, job.error_detail, job.lease_expires_at, job.worker_id = error_code[:100], detail, None, None
+    await _finish_attempt(session, job, "failed" if terminal else "retry", safe_code, detail)
+    job.error_code, job.error_detail, job.lease_expires_at, job.worker_id = safe_code, detail, None, None
     job.status = "failed" if terminal else "queued"
     if terminal:
         job.completed_at = now

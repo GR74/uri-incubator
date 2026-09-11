@@ -9,7 +9,7 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-from uri_backend.ingestion.models import IngestionJob, IngestionRun
+from uri_backend.ingestion.models import IngestionJob, IngestionJobAttempt, IngestionRun
 from uri_backend.ingestion.queue import (
     JobLeaseLost,
     cancel_job,
@@ -19,7 +19,13 @@ from uri_backend.ingestion.queue import (
     fail_job,
     heartbeat_job,
 )
-from uri_backend.ingestion.worker import PipelineDispatcher, run_worker
+from uri_backend.ingestion.worker import (
+    PipelineDispatcher,
+    WorkerConfigurationError,
+    build_default_dispatcher,
+    run_configured_worker,
+    run_worker,
+)
 from uri_backend.projects.models import Project, ProjectMembership, User
 from uri_backend.sources.models import Artifact, Source, SourceVersion
 
@@ -280,6 +286,25 @@ async def test_error_detail_is_redacted_before_persistence(
     assert all("participant private methods" not in (detail or "") for detail in persisted)
 
 
+async def test_error_code_is_sanitized_and_bounded_before_attempt_persistence(
+    db_engine: AsyncEngine, source_version_id: UUID
+) -> None:
+    """Raw secret-bearing codes must not overflow or leak through attempt history first."""
+    await enqueue(db_engine, source_version_id)
+    claimed = await claim(db_engine, "worker-a")
+    assert claimed is not None
+    unsafe_code = "Bearer sk-live-123/" + "x" * 200
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        await fail_job(session, claimed.id, "worker-a", unsafe_code, "safe detail")
+        await session.commit()
+        codes = (await session.execute(
+            sa.text("SELECT error_code FROM ingestion_jobs UNION ALL SELECT error_code FROM ingestion_runs UNION ALL SELECT error_code FROM ingestion_job_attempts")
+        )).scalars().all()
+
+    assert all(len(code or "") <= 100 for code in codes)
+    assert all("sk-live" not in (code or "") for code in codes)
+
+
 async def test_worker_dispatches_registered_pipeline_then_stops_cleanly(
     db_engine: AsyncEngine, source_version_id: UUID
 ) -> None:
@@ -304,3 +329,40 @@ async def test_worker_dispatches_registered_pipeline_then_stops_cleanly(
 
     async with factory() as session:
         assert await session.scalar(sa.select(IngestionJob.status)) == "succeeded"
+
+
+async def test_default_worker_dispatcher_refuses_to_claim_unimplemented_normalization() -> None:
+    """The Task 5 console worker must fail fast before it claims Task 6 normalization jobs."""
+    dispatcher = build_default_dispatcher()
+
+    assert dispatcher.can_dispatch("normalization-v1") is False
+    with pytest.raises(WorkerConfigurationError):
+        await run_configured_worker(None)  # type: ignore[arg-type]
+
+
+async def test_worker_cancellation_commits_failure_transition(
+    db_engine: AsyncEngine, source_version_id: UUID
+) -> None:
+    """Cancelling after a handler error must finish the failed/retry transition, not strand running."""
+    await enqueue(db_engine, source_version_id)
+    dispatcher = PipelineDispatcher()
+    failure_started = asyncio.Event()
+
+    async def failing_handler(_: object) -> None:
+        failure_started.set()
+        raise RuntimeError("synthetic handler failure")
+
+    dispatcher.register("test-pipeline", failing_handler)
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    worker = asyncio.create_task(run_worker(factory, dispatcher=dispatcher, worker_id="worker-a", poll_seconds=10))
+    await asyncio.wait_for(failure_started.wait(), timeout=2)
+    worker.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await worker
+
+    async with factory() as session:
+        status = await session.scalar(sa.select(IngestionJob.status))
+        attempts = await session.scalar(sa.select(sa.func.count()).select_from(IngestionJobAttempt))
+
+    assert status == "queued"
+    assert attempts == 1
