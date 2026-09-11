@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from uuid import UUID, uuid4
+
+import httpx
+import pytest_asyncio
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+
+from uri_backend.api import create_app
+from uri_backend.config import Settings
+from uri_backend.projects.models import Project, ProjectMembership, User
+from uri_backend.sources.artifacts import StoredArtifact
+from uri_backend.sources.schemas import RegisterSourceVersion
+from uri_backend.sources.service import register_source_version
+
+
+@dataclass(frozen=True)
+class SourceFixture:
+    project_id: UUID
+    actor_id: UUID
+    outsider_id: UUID
+    stashed_project_id: UUID
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clean_source_tables(db_engine: AsyncEngine) -> None:
+    async with db_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "TRUNCATE TABLE source_quality_assessments, content_parts, source_versions, "
+                "sources, artifacts, audit_events, membership_capabilities, "
+                "project_memberships, projects, labs, users CASCADE"
+            )
+        )
+
+
+@pytest_asyncio.fixture
+async def source_fixture(db_engine: AsyncEngine) -> SourceFixture:
+    actor_id, outsider_id = uuid4(), uuid4()
+    project_id, stashed_project_id = uuid4(), uuid4()
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        session.add_all(
+            [
+                User(id=actor_id, display_name="Researcher", is_pilot_actor=True),
+                User(id=outsider_id, display_name="Outsider", is_pilot_actor=True),
+                Project(id=project_id, name="Active project"),
+                Project(id=stashed_project_id, name="Archived", state="stashed"),
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
+                ProjectMembership(user_id=actor_id, project_id=project_id, role="owner"),
+                ProjectMembership(user_id=actor_id, project_id=stashed_project_id, role="owner"),
+            ]
+        )
+        await session.commit()
+    return SourceFixture(project_id, actor_id, outsider_id, stashed_project_id)
+
+
+@pytest_asyncio.fixture
+async def client(db_engine: AsyncEngine, tmp_path: Path) -> httpx.AsyncClient:
+    app = create_app(
+        Settings(
+            database_url="postgresql+psycopg://unused",
+            pilot_mode=True,
+            artifact_root=tmp_path / "artifacts",
+            staging_root=tmp_path / "staging",
+        )
+    )
+    app.state.database_engine = db_engine
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as result:
+        yield result
+
+
+def artifact() -> StoredArtifact:
+    return StoredArtifact(
+        sha256="1" * 64,
+        storage_key="11/" + "1" * 62,
+        byte_size=14,
+    )
+
+
+async def test_same_source_version_is_idempotent(
+    db_engine: AsyncEngine, source_fixture: SourceFixture
+) -> None:
+    command = RegisterSourceVersion(
+        project_id=source_fixture.project_id,
+        family="document",
+        external_id="methods.md",
+        native_version="git:abc123",
+        media_type="text/markdown",
+    )
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        actor = await session.get(User, source_fixture.actor_id)
+        assert actor is not None
+        first = await register_source_version(session, actor, command, artifact())
+        second = await register_source_version(session, actor, command, artifact())
+        await session.commit()
+
+    assert first.id == second.id
+
+
+async def test_cross_project_source_read_returns_not_found(
+    client: httpx.AsyncClient, source_fixture: SourceFixture
+) -> None:
+    created = await client.post(
+        f"/api/projects/{source_fixture.project_id}/sources/uploads",
+        headers={"X-URI-User-ID": str(source_fixture.actor_id)},
+        content=b"methods",
+        params={
+            "family": "document",
+            "external_id": "methods.md",
+            "native_version": "git:abc123",
+            "media_type": "text/markdown",
+        },
+    )
+    assert created.status_code == 201
+
+    response = await client.get(
+        f"/api/projects/{source_fixture.project_id}/sources",
+        headers={"X-URI-User-ID": str(source_fixture.outsider_id)},
+    )
+
+    assert response.status_code == 404
+
+
+async def test_stashed_project_rejects_source_upload(
+    client: httpx.AsyncClient, source_fixture: SourceFixture, tmp_path: Path
+) -> None:
+    response = await client.post(
+        f"/api/projects/{source_fixture.stashed_project_id}/sources/uploads",
+        headers={"X-URI-User-ID": str(source_fixture.actor_id)},
+        content=b"methods",
+        params={
+            "family": "document",
+            "external_id": "methods.md",
+            "native_version": "git:abc123",
+            "media_type": "text/markdown",
+        },
+    )
+
+    assert response.status_code == 409
+    assert not (tmp_path / "artifacts").exists()

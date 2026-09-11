@@ -10,6 +10,7 @@ from uri_backend.database import create_engine
 from uri_backend.errors import URIBackendError
 from uri_backend.projects.router import router as projects_router
 from uri_backend.projects.service import CapabilityDenied, UnknownActor
+from uri_backend.sources.router import router as sources_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -29,6 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="URI Research Backend", version="0.1.0", lifespan=lifespan)
     app.state.settings = resolved
     app.include_router(projects_router)
+    app.include_router(sources_router)
 
     @app.exception_handler(UnknownActor)
     async def unknown_actor_handler(_: Request, __: UnknownActor) -> JSONResponse:
