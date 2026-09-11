@@ -22,6 +22,7 @@ from uri_backend.sources.schemas import GitSourceCommand
 GIT_MANIFEST_MEDIA_TYPE = "application/vnd.uri.git-manifest+json"
 MAX_GIT_BLOB_BYTES = 1_000_000
 _OBJECT_ID = re.compile(r"^[0-9a-fA-F]{7,64}$")
+_WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:")
 _SECRET_PATH = re.compile(
     r"(?:^|/)(?:\.?(?:env|npmrc)|.*(?:secret|credential|password|token|private[_-]?key).*)(?:$|/)",
     re.IGNORECASE,
@@ -231,6 +232,7 @@ class GitAdapter:
             if (
                 not path
                 or path.startswith(("/", "\\"))
+                or _WINDOWS_DRIVE_PATH.match(path)
                 or pure.is_absolute()
                 or ".." in pure.parts
                 or "\\" in path

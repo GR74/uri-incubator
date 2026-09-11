@@ -105,3 +105,12 @@ def test_git_import_rejects_repository_escape(
     command = git_fixture_repo.command(repository_root=tmp_path / "..")
     with pytest.raises(UnsafeSourcePath):
         GitAdapter().inventory(command)
+
+
+def test_git_import_rejects_windows_drive_qualified_include_path(
+    git_fixture_repo: GitFixtureRepository,
+) -> None:
+    with pytest.raises(UnsafeSourcePath):
+        GitAdapter().inventory(
+            git_fixture_repo.command(include_paths=["C:/sensitive/**"])
+        )

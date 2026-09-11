@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LOCAL_ROOT = Path(__file__).resolve().parents[1] / ".local"
@@ -17,3 +18,4 @@ class Settings(BaseSettings):
     job_poll_interval_seconds: float = 1.0
     job_max_attempts: int = 3
     pilot_mode: bool = False
+    approved_git_repository_roots: dict[str, list[Path]] = Field(default_factory=dict)

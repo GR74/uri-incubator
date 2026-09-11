@@ -108,16 +108,47 @@ def inventory_git(command: GitSourceCommand):
         ) from error
 
 
+def require_approved_git_root(
+    request: Request, project_id: UUID, command: GitSourceCommand
+) -> None:
+    """Fail closed before Git is invoked unless this project owns the exact root."""
+    submitted = command.repository_root
+    try:
+        canonical = submitted.resolve(strict=True)
+    except OSError as error:
+        raise HTTPException(
+            status_code=422, detail="Unsafe or unapproved Git source."
+        ) from error
+    approved_roots = request.app.state.settings.approved_git_repository_roots.get(
+        str(project_id), []
+    )
+    if submitted != canonical or not approved_roots:
+        raise HTTPException(status_code=422, detail="Unsafe or unapproved Git source.")
+    for approved in approved_roots:
+        try:
+            if (
+                approved.is_absolute()
+                and approved == approved.resolve(strict=True)
+                and canonical == approved
+            ):
+                return
+        except OSError:
+            continue
+    raise HTTPException(status_code=422, detail="Unsafe or unapproved Git source.")
+
+
 @router.post(
     "/projects/{project_id}/sources/git/preview", response_model=GitPreviewResponse
 )
 async def post_git_preview(
     project_id: UUID,
     command: GitSourceCommand,
+    request: Request,
     actor: ActorDep,
     session: SessionDep,
 ) -> GitPreviewResponse:
     await require_git_write(session, actor, project_id)
+    require_approved_git_root(request, project_id, command)
     return git_preview_response(inventory_git(command))
 
 
@@ -134,6 +165,7 @@ async def post_git_source(
     session: SessionDep,
 ) -> SourceVersionResponse:
     await require_git_write(session, actor, project_id)
+    require_approved_git_root(request, project_id, command)
     adapter = GitAdapter()
     inventory = inventory_git(command)
     # Persist the canonical object manifest before registration/normalization so

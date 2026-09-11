@@ -24,6 +24,7 @@ from uri_backend.sources.service import register_source_version
 @dataclass(frozen=True)
 class SourceFixture:
     project_id: UUID
+    other_project_id: UUID
     actor_id: UUID
     outsider_id: UUID
     stashed_project_id: UUID
@@ -44,13 +45,14 @@ async def clean_source_tables(db_engine: AsyncEngine) -> None:
 @pytest_asyncio.fixture
 async def source_fixture(db_engine: AsyncEngine) -> SourceFixture:
     actor_id, outsider_id = uuid4(), uuid4()
-    project_id, stashed_project_id = uuid4(), uuid4()
+    project_id, other_project_id, stashed_project_id = uuid4(), uuid4(), uuid4()
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
         session.add_all(
             [
                 User(id=actor_id, display_name="Researcher", is_pilot_actor=True),
                 User(id=outsider_id, display_name="Outsider", is_pilot_actor=True),
                 Project(id=project_id, name="Active project"),
+                Project(id=other_project_id, name="Other active project"),
                 Project(id=stashed_project_id, name="Archived", state="stashed"),
             ]
         )
@@ -61,12 +63,17 @@ async def source_fixture(db_engine: AsyncEngine) -> SourceFixture:
                     user_id=actor_id, project_id=project_id, role="owner"
                 ),
                 ProjectMembership(
+                    user_id=actor_id, project_id=other_project_id, role="owner"
+                ),
+                ProjectMembership(
                     user_id=actor_id, project_id=stashed_project_id, role="owner"
                 ),
             ]
         )
         await session.commit()
-    return SourceFixture(project_id, actor_id, outsider_id, stashed_project_id)
+    return SourceFixture(
+        project_id, other_project_id, actor_id, outsider_id, stashed_project_id
+    )
 
 
 @pytest_asyncio.fixture
@@ -120,6 +127,12 @@ def create_synthetic_git_repository(root: Path) -> str:
         text=True,
         capture_output=True,
     ).stdout.strip()
+
+
+def approve_git_root(client: httpx.AsyncClient, project_id: UUID, root: Path) -> None:
+    client._transport.app.state.settings.approved_git_repository_roots = {
+        str(project_id): [root.resolve()]
+    }
 
 
 async def test_same_source_version_is_idempotent(
@@ -279,6 +292,7 @@ async def test_git_preview_is_authorized_and_does_not_persist(
 ) -> None:
     root = tmp_path / "synthetic-git"
     sha = create_synthetic_git_repository(root)
+    approve_git_root(client, source_fixture.project_id, root)
     before = git_status(root)
 
     response = await client.post(
@@ -305,6 +319,7 @@ async def test_git_registration_persists_an_immutable_manifest(
 ) -> None:
     root = tmp_path / "synthetic-git"
     sha = create_synthetic_git_repository(root)
+    approve_git_root(client, source_fixture.project_id, root)
 
     response = await client.post(
         f"/api/projects/{source_fixture.project_id}/sources/git",
@@ -324,3 +339,48 @@ async def test_git_registration_persists_an_immutable_manifest(
     manifest = next(path for path in artifacts if path.is_file()).read_text(encoding="ascii")
     assert '"resolved_head_sha"' in manifest
     assert "synthetic methods" in manifest
+
+
+async def test_git_preview_rejects_a_valid_but_unapproved_repository(
+    client: httpx.AsyncClient, source_fixture: SourceFixture, tmp_path: Path
+) -> None:
+    root = tmp_path / "unapproved-git"
+    sha = create_synthetic_git_repository(root)
+    before = git_status(root)
+
+    response = await client.post(
+        f"/api/projects/{source_fixture.project_id}/sources/git/preview",
+        headers={"X-URI-User-ID": str(source_fixture.actor_id)},
+        json={
+            "repository_root": str(root.resolve()),
+            "ref_name": "refs/heads/pilot",
+            "start_commit": sha,
+            "end_commit": sha,
+            "include_paths": ["methods.md"],
+        },
+    )
+
+    assert response.status_code == 422
+    assert git_status(root) == before == b""
+
+
+async def test_git_approved_root_cannot_cross_project_boundary(
+    client: httpx.AsyncClient, source_fixture: SourceFixture, tmp_path: Path
+) -> None:
+    root = tmp_path / "approved-for-first-project"
+    sha = create_synthetic_git_repository(root)
+    approve_git_root(client, source_fixture.project_id, root)
+
+    response = await client.post(
+        f"/api/projects/{source_fixture.other_project_id}/sources/git/preview",
+        headers={"X-URI-User-ID": str(source_fixture.actor_id)},
+        json={
+            "repository_root": str(root.resolve()),
+            "ref_name": "refs/heads/pilot",
+            "start_commit": sha,
+            "end_commit": sha,
+            "include_paths": ["methods.md"],
+        },
+    )
+
+    assert response.status_code == 422
