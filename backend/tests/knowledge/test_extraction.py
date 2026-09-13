@@ -10,12 +10,17 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tests.fakes import FakeStructuredProvider
-from uri_backend.ingestion.models import IngestionJob
+from uri_backend.ingestion.models import (
+    ExtractionRun,
+    IngestionJob,
+    IngestionJobAttempt,
+)
 from uri_backend.ingestion.queue import (
     ClaimedJob,
     JobLeaseLost,
     claim_next_job,
     enqueue_extraction,
+    fail_job,
 )
 from uri_backend.ingestion.worker import build_extraction_handler
 from uri_backend.knowledge.extraction import (
@@ -284,3 +289,29 @@ async def test_stale_extraction_attempt_cannot_publish_draft(db_engine, seed_par
 
     async with factory() as verification:
         assert await verification.scalar(sa.select(sa.func.count()).select_from(DraftSet)) == 0
+
+
+async def test_attempt_provenance_stays_distinct_and_terminal_failure_stops(db_engine, seed_parts) -> None:
+    session, version, _ = seed_parts
+    run = await enqueue_extraction(session, version.id)
+    await session.commit()
+    await session.close()
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as setup:
+        job = await setup.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
+        assert job is not None
+        job.status, job.worker_id, job.attempt = "running", "test", 1
+        job.lease_expires_at = sa.func.now() + sa.text("interval '30 seconds'")
+        setup.add(IngestionJobAttempt(job_id=job.id, attempt=1, worker_id="test"))
+        setup.add_all([
+            ExtractionRun(source_version_id=version.id, ingestion_run_id=run.id, job_id=job.id, attempt=1, worker_id="test", pipeline_version="extraction-v1", model_id="a", model_digest="sha256:a", prompt_version="p1", schema_version="s1", parser_version="n1", sampling_config={"temperature": 0}, sampling_version="v1", status="failed"),
+            ExtractionRun(source_version_id=version.id, ingestion_run_id=run.id, job_id=job.id, attempt=2, worker_id="test", pipeline_version="extraction-v1", model_id="b", model_digest="sha256:b", prompt_version="p2", schema_version="s1", parser_version="n1", sampling_config={"temperature": 0}, sampling_version="v1", status="retry"),
+        ])
+        await setup.flush()
+        await fail_job(setup, job.id, "test", "provider_schema_invalid", "Provider extraction failed", terminal=True)
+        await setup.commit()
+    async with factory() as verify:
+        rows = (await verify.scalars(sa.select(ExtractionRun).order_by(ExtractionRun.attempt))).all()
+        job = await verify.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
+        assert [(row.attempt, row.model_digest) for row in rows] == [(1, "sha256:a"), (2, "sha256:b")]
+        assert job is not None and job.status == "failed"
