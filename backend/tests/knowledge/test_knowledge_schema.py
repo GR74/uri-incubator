@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from uri_backend.knowledge.errors import ImmutableRecordError
 from uri_backend.knowledge.models import (
+    Base,
     CandidateCitation,
     DraftCandidate,
     DraftRelation,
@@ -312,3 +314,69 @@ async def test_database_rejects_published_identity_and_review_mutation(
         await session.rollback()
         with pytest.raises(sa.exc.DBAPIError, match="immutable"):
             await session.execute(sa.delete(Review).where(Review.id == review_id))
+
+
+async def test_concurrent_citation_deletes_cannot_leave_an_evidence_candidate_uncited(
+    db_engine: AsyncEngine, source_version: SourceVersion
+) -> None:
+    """Deleting different citations concurrently must serialize on their shared owner."""
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as session:
+        draft_set = DraftSet(project_id=source_version.project_id, author_id=source_version.created_by)
+        session.add(draft_set)
+        await session.flush()
+        candidate = DraftCandidate(draft_set_id=draft_set.id, candidate_type="result", statement="Cited.", payload={}, confidence=0.8)
+        session.add(candidate)
+        await session.flush()
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        first = CandidateCitation(candidate_id=candidate.id, content_part_id=part_id, quote="The analysis produced a difference.")
+        second = CandidateCitation(candidate_id=candidate.id, content_part_id=part_id, quote="A second exact citation.")
+        session.add_all([first, second])
+        await session.commit()
+        candidate_id, first_id, second_id = candidate.id, first.id, second.id
+
+    async def delete_one(citation_id):
+        async with factory() as session:
+            await session.execute(sa.delete(CandidateCitation).where(CandidateCitation.id == citation_id))
+            try:
+                await session.commit()
+            except sa.exc.DBAPIError as error:
+                await session.rollback()
+                return error
+            return None
+
+    first_result, second_result = await asyncio.gather(delete_one(first_id), delete_one(second_id))
+    assert sum(result is None for result in (first_result, second_result)) == 1
+    assert any(result is not None and "citation" in str(result) for result in (first_result, second_result))
+    async with factory() as session:
+        assert await session.scalar(sa.select(sa.func.count()).select_from(CandidateCitation).where(CandidateCitation.candidate_id == candidate_id)) == 1
+
+
+async def test_task_one_orm_metadata_matches_migrated_postgres_schema(db_engine: AsyncEngine) -> None:
+    """A missing column or FK policy in ORM metadata must be caught before autogenerate drifts."""
+    table_names = {
+        "draft_sets", "draft_candidates", "candidate_citations", "draft_relations",
+        "draft_relation_citations", "reviews", "graph_entities", "records",
+        "record_versions", "record_citations", "relations", "relation_citations", "supersessions",
+    }
+    async with db_engine.connect() as connection:
+        def inspect_schema(sync_connection):
+            inspector = sa.inspect(sync_connection)
+            return {
+                table: {
+                    "columns": {column["name"]: column["nullable"] for column in inspector.get_columns(table)},
+                    "foreign_keys": {(foreign_key["constrained_columns"][0], foreign_key["referred_table"], foreign_key.get("options", {}).get("ondelete")) for foreign_key in inspector.get_foreign_keys(table)},
+                }
+                for table in table_names
+            }
+        database = await connection.run_sync(inspect_schema)
+    assert table_names <= set(Base.metadata.tables)
+    for table_name in table_names:
+        model = Base.metadata.tables[table_name]
+        assert {column.name: column.nullable for column in model.columns} == database[table_name]["columns"]
+        model_foreign_keys = {
+            (foreign_key.elements[0].parent.name, foreign_key.elements[0].column.table.name, foreign_key.ondelete)
+            for foreign_key in model.foreign_key_constraints
+        }
+        assert model_foreign_keys == database[table_name]["foreign_keys"]
