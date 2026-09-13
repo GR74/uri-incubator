@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 import uri_backend.sources.models  # noqa: F401
 import uri_backend.ingestion.models  # noqa: F401
+import uri_backend.knowledge.models  # noqa: F401
 from uri_backend.config import Settings
 from uri_backend.projects.models import Base
 
