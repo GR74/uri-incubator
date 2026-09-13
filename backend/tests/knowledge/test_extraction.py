@@ -315,3 +315,23 @@ async def test_attempt_provenance_stays_distinct_and_terminal_failure_stops(db_e
         job = await verify.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
         assert [(row.attempt, row.model_digest) for row in rows] == [(1, "sha256:a"), (2, "sha256:b")]
         assert job is not None and job.status == "failed"
+
+
+async def test_retryable_provider_failure_returns_job_to_queue(db_engine, seed_parts) -> None:
+    session, version, _ = seed_parts
+    run = await enqueue_extraction(session, version.id)
+    await session.commit()
+    await session.close()
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as setup:
+        job = await setup.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
+        assert job is not None
+        job.status, job.worker_id, job.attempt = "running", "retry", 1
+        job.lease_expires_at = sa.func.now() + sa.text("interval '30 seconds'")
+        setup.add(IngestionJobAttempt(job_id=job.id, attempt=1, worker_id="retry"))
+        await setup.flush()
+        await fail_job(setup, job.id, "retry", "provider_timeout", "Provider extraction failed")
+        await setup.commit()
+    async with factory() as verify:
+        job = await verify.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
+        assert job is not None and job.status == "queued" and job.attempt == 1
