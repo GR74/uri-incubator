@@ -48,6 +48,11 @@ class NotebookAdapter:
         notebook = nbformat.reads(raw.decode("utf-8"), as_version=4)
         if len(notebook.cells) > MAX_CELLS:
             return self._failed("cell_limit_exceeded", "Notebook exceeds the cell limit.")
+        if contains_participant_rows(dict(notebook.metadata)):
+            return self._failed("participant_data_disallowed", "Participant-row-like data is not allowed in notebook records.")
+        for cell in notebook.cells:
+            if contains_participant_rows(dict(cell.get("metadata", {}))) or contains_participant_rows(cell.get("outputs", [])):
+                return self._failed("participant_data_disallowed", "Participant-row-like data is not allowed in notebook records.")
         parts: list[NormalizedPart] = []
         warnings: list[NormalizationWarning] = []
         for cell_number, cell in enumerate(notebook.cells, start=1):

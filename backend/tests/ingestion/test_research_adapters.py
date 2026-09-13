@@ -7,6 +7,7 @@ from uri_backend.ingestion.adapters.lab_notebooks import LabNotebookAdapter
 from uri_backend.ingestion.adapters.manifests import ManifestAdapter
 from uri_backend.ingestion.adapters.notebooks import NotebookAdapter
 from uri_backend.ingestion.contracts import AdapterInput
+from uri_backend.ingestion.privacy import contains_participant_rows
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 
@@ -23,6 +24,35 @@ def test_notebook_preserves_cell_order_execution_and_textual_output() -> None:
     assert result.parts[1].metadata["execution_count"] == 1
     assert "score: 0" in result.parts[1].text
     assert any(warning.code == "rich_output_skipped" for warning in result.warnings)
+
+
+def test_notebook_rejects_participant_rows_in_metadata_without_value_leakage(tmp_path: Path) -> None:
+    marker = "PRIVATE-NOTEBOOK-MARKER"
+    artifact = tmp_path / "unsafe.ipynb"
+    artifact.write_text(
+        '{"nbformat":4,"nbformat_minor":5,"metadata":{"records":[{"participant_id":"'
+        + marker
+        + '","score":1}]},"cells":[]}',
+        encoding="utf-8",
+    )
+
+    result = NotebookAdapter().normalize(
+        AdapterInput(artifact_path=artifact, family="notebook_run", media_type="application/x-ipynb+json")
+    )
+
+    assert result.status == "failed"
+    assert result.parts == []
+    assert [warning.code for warning in result.warnings] == ["participant_data_disallowed"]
+    assert marker not in result.warnings[0].message
+
+
+def test_nested_list_participant_rows_are_detected_without_rejecting_aggregate_summary() -> None:
+    assert contains_participant_rows(
+        [[{"participant_id": "PRIVATE-NESTED-MARKER", "score": 1}]]
+    )
+    assert not contains_participant_rows(
+        {"cohort_summary": {"participant_count": 20, "mean_age": 24.5}}
+    )
 
 
 def test_run_json_keeps_zero_and_negative_metrics() -> None:

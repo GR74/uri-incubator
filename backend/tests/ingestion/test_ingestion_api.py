@@ -200,6 +200,30 @@ async def test_parse_failure_purges_generic_upload_quarantine(
     assert not any(path.is_file() for path in root.rglob("*"))
 
 
+async def test_notebook_metadata_participant_row_is_purged_before_publication(
+    client: httpx.AsyncClient, pilot_owner: User, pilot_project: Project
+) -> None:
+    marker = b"PRIVATE-NOTEBOOK-HTTP-MARKER"
+    payload = (
+        b'{"nbformat":4,"nbformat_minor":5,"metadata":{"records":[{"participant_id":"'
+        + marker
+        + b'","score":1}]},"cells":[]}'
+    )
+    response = await client.post(
+        f"/api/projects/{pilot_project.id}/sources/uploads",
+        headers={"X-URI-User-ID": str(pilot_owner.id)},
+        content=payload,
+        params={"family": "notebook_run", "external_id": "unsafe.ipynb", "native_version": "v1", "media_type": "application/x-ipynb+json"},
+    )
+
+    assert response.status_code == 422
+    root = client._transport.app.state.settings.artifact_root.parent
+    assert all(marker not in path.read_bytes() for path in root.rglob("*") if path.is_file())
+    async with async_sessionmaker(client._transport.app.state.database_engine)() as session:
+        for table in ("artifacts", "sources", "source_versions", "ingestion_runs"):
+            assert await session.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
+
+
 async def test_interrupted_generic_upload_purges_quarantine(
     client: httpx.AsyncClient, pilot_owner: User, pilot_project: Project
 ) -> None:
