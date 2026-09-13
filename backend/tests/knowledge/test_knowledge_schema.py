@@ -463,6 +463,66 @@ async def test_database_rejects_draft_relation_citation_reparenting(
             await session.execute(sa.update(DraftRelationCitation).where(DraftRelationCitation.id == citation.id).values(draft_relation_id=second_relation.id))
 
 
+async def test_database_rejects_cross_project_graph_entities(
+    db_engine: AsyncEngine, source_version: SourceVersion
+) -> None:
+    """Typed native entities cannot be registered in a project that does not own them."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        other = Project(name="Unrelated graph project")
+        session.add(other)
+        await session.flush()
+        source_id = await session.scalar(sa.select(Source.id).where(Source.project_id == source_version.project_id))
+        assert source_id is not None
+        session.add(GraphEntity(project_id=other.id, entity_type="source", native_id=source_id))
+        with pytest.raises(sa.exc.DBAPIError, match="source graph entity"):
+            await session.commit()
+
+
+async def test_database_rejects_cross_and_third_project_relation_endpoints(
+    db_engine: AsyncEngine, source_version: SourceVersion
+) -> None:
+    """Ordinary edges stay local and continued_from starts in its new project, never a third one."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        predecessor = Project(name="Predecessor project")
+        third = Project(name="Third graph project")
+        session.add_all([predecessor, third])
+        await session.flush()
+        source_project_entity = GraphEntity(project_id=source_version.project_id, entity_type="project", native_id=source_version.project_id)
+        predecessor_entity = GraphEntity(project_id=predecessor.id, entity_type="project", native_id=predecessor.id)
+        session.add_all([source_project_entity, predecessor_entity])
+        await session.flush()
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        relation = Relation(project_id=third.id, source_entity_id=source_project_entity.id, target_entity_id=predecessor_entity.id, relation_type="continued_from")
+        session.add(relation)
+        await session.flush()
+        session.add(RelationCitation(relation_id=relation.id, content_part_id=part_id, quote="The analysis produced a difference."))
+        with pytest.raises(sa.exc.DBAPIError, match="relation endpoints"):
+            await session.commit()
+
+
+async def test_database_rejects_ordinary_cross_project_relation_endpoints(
+    db_engine: AsyncEngine, source_version: SourceVersion
+) -> None:
+    """A normal relation cannot borrow a graph entity from another project."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        other = Project(name="Foreign endpoint project")
+        session.add(other)
+        await session.flush()
+        local_entity = GraphEntity(project_id=source_version.project_id, entity_type="project", native_id=source_version.project_id)
+        foreign_entity = GraphEntity(project_id=other.id, entity_type="project", native_id=other.id)
+        session.add_all([local_entity, foreign_entity])
+        await session.flush()
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        relation = Relation(project_id=source_version.project_id, source_entity_id=local_entity.id, target_entity_id=foreign_entity.id, relation_type="supports")
+        session.add(relation)
+        await session.flush()
+        session.add(RelationCitation(relation_id=relation.id, content_part_id=part_id, quote="The analysis produced a difference."))
+        with pytest.raises(sa.exc.DBAPIError, match="relation endpoints"):
+            await session.commit()
+
+
 async def test_database_rejects_backward_and_cross_record_supersessions(
     db_engine: AsyncEngine, source_version: SourceVersion
 ) -> None:
