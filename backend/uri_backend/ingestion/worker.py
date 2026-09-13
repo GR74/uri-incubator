@@ -126,7 +126,7 @@ def build_normalization_handler(
 def _configured_extraction_config(settings: Settings) -> ExtractionConfig:
     return ExtractionConfig(
         model_id=settings.generation_model or "unconfigured",
-        model_digest="unavailable" if not settings.local_ai_enabled else "unverified",
+        model_digest=settings.generation_model_digest or "unavailable",
         prompt_version="extraction-prompt-v1",
         schema_version="candidate-batch-v1",
         parser_version="normalization-v1",
@@ -161,6 +161,7 @@ def build_extraction_handler(
                 active_provider,
                 active_config,
                 ingestion_run_id=job.run_id,
+                claimed_job=job,
             )
 
     return handler
@@ -352,7 +353,7 @@ async def _complete_transition(
 
 
 async def _failure_transition(
-    sessions: async_sessionmaker[AsyncSession], claimed: ClaimedJob
+    sessions: async_sessionmaker[AsyncSession], claimed: ClaimedJob, *, retryable: bool = True
 ) -> None:
     async with sessions() as session:
         await owned_claim(session, claimed)
@@ -362,6 +363,7 @@ async def _failure_transition(
             claimed.worker_id,
             "handler_error",
             "Worker handler failed",
+            terminal=not retryable,
         )
         await session.commit()
 
@@ -442,8 +444,10 @@ async def run_worker(
                 raise
             except JobLeaseLost:
                 continue
-            except Exception:  # noqa: BLE001 - durable, redacted handler outcome.
-                await _await_committed(_failure_transition(sessions, claimed))
+            except Exception as error:  # noqa: BLE001 - durable, redacted handler outcome.
+                await _await_committed(
+                    _failure_transition(sessions, claimed, retryable=getattr(error, "retryable", True))
+                )
             else:
                 await _await_committed(_complete_transition(sessions, claimed))
         except JobLeaseLost:

@@ -22,7 +22,10 @@ def upgrade() -> None:
         "extraction_runs",
         sa.Column("id", uuid, primary_key=True),
         sa.Column("source_version_id", uuid, sa.ForeignKey("source_versions.id"), nullable=False),
-        sa.Column("ingestion_run_id", uuid, sa.ForeignKey("ingestion_runs.id"), unique=True),
+        sa.Column("ingestion_run_id", uuid, sa.ForeignKey("ingestion_runs.id")),
+        sa.Column("job_id", uuid, sa.ForeignKey("ingestion_jobs.id")),
+        sa.Column("attempt", sa.Integer),
+        sa.Column("worker_id", sa.String(200)),
         sa.Column("pipeline_version", sa.String(100), nullable=False),
         sa.Column("model_id", sa.String(300), nullable=False),
         sa.Column("model_digest", sa.String(300), nullable=False),
@@ -39,9 +42,10 @@ def upgrade() -> None:
         sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("now()")),
         sa.Column("completed_at", timestamp),
         sa.CheckConstraint("status IN ('queued', 'running', 'succeeded', 'retry', 'failed')", name="ck_extraction_run_status"),
-        sa.UniqueConstraint("source_version_id", "pipeline_version", name="uq_extraction_run_source_pipeline"),
+        sa.UniqueConstraint("job_id", "attempt", name="uq_extraction_run_job_attempt"),
     )
     op.add_column("draft_sets", sa.Column("extraction_run_id", uuid, sa.ForeignKey("extraction_runs.id")))
+    op.create_unique_constraint("uq_draft_set_extraction_run", "draft_sets", ["extraction_run_id"])
     op.add_column("draft_candidates", sa.Column("extraction_run_id", uuid, sa.ForeignKey("extraction_runs.id")))
     op.add_column("draft_relations", sa.Column("extraction_run_id", uuid, sa.ForeignKey("extraction_runs.id")))
     op.add_column("draft_relations", sa.Column("source_record_id", uuid, sa.ForeignKey("records.id")))
@@ -96,6 +100,7 @@ def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS validate_draft_relation_endpoints()")
     op.drop_constraint("ck_draft_relation_target_endpoint", "draft_relations", type_="check")
     op.drop_constraint("ck_draft_relation_source_endpoint", "draft_relations", type_="check")
+    op.execute("DELETE FROM draft_relations WHERE source_record_id IS NOT NULL OR target_record_id IS NOT NULL")
     uuid = postgresql.UUID(as_uuid=True)
     op.alter_column("draft_relations", "target_candidate_id", existing_type=uuid, nullable=False)
     op.alter_column("draft_relations", "source_candidate_id", existing_type=uuid, nullable=False)
@@ -103,5 +108,6 @@ def downgrade() -> None:
     op.drop_column("draft_relations", "source_record_id")
     op.drop_column("draft_relations", "extraction_run_id")
     op.drop_column("draft_candidates", "extraction_run_id")
+    op.execute("ALTER TABLE draft_sets DROP CONSTRAINT IF EXISTS uq_draft_set_extraction_run")
     op.drop_column("draft_sets", "extraction_run_id")
     op.drop_table("extraction_runs")

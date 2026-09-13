@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from hashlib import sha256
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -61,6 +63,10 @@ def _warning(code: str, **details: object) -> dict[str, object]:
     return {"code": code, **details}
 
 
+def _candidate_ref(ordinal: int, key: str) -> dict[str, object]:
+    return {"candidate_ordinal": ordinal, "candidate_digest": sha256(key.encode()).hexdigest()[:16]}
+
+
 def _safe_response_metadata(provider: object) -> dict[str, object]:
     metadata = getattr(provider, "response_metadata", {})
     if not isinstance(metadata, dict):
@@ -79,13 +85,20 @@ def _windows(parts: list[ContentPart], limit: int) -> list[dict[str, object]]:
     current: list[dict[str, object]] = []
     current_size = 0
     for part in parts:
-        item = {"part_id": str(part.id), "locator": part.locator, "text": part.text}
-        size = len(part.text)
-        if current and current_size + size > limit:
-            windows.append({"parts": current})
-            current, current_size = [], 0
-        current.append(item)
-        current_size += size
+        for offset_start in range(0, len(part.text), limit):
+            text = part.text[offset_start : offset_start + limit]
+            item = {
+                "part_id": str(part.id),
+                "locator": part.locator,
+                "offset_start": offset_start,
+                "offset_end": offset_start + len(text),
+                "text": text,
+            }
+            if current and current_size + len(text) > limit:
+                windows.append({"parts": current})
+                current, current_size = [], 0
+            current.append(item)
+            current_size += len(text)
     if current:
         windows.append({"parts": current})
     return windows
@@ -96,19 +109,23 @@ async def _get_or_create_run(
     source_version_id: UUID,
     config: ExtractionConfig,
     ingestion_run_id: UUID | None,
+    job_id: UUID | None = None,
+    attempt: int | None = None,
+    worker_id: str | None = None,
 ) -> ExtractionRun:
+    where = [ExtractionRun.job_id == job_id, ExtractionRun.attempt == attempt] if job_id else [ExtractionRun.source_version_id == source_version_id, ExtractionRun.pipeline_version == config.pipeline_version, ExtractionRun.job_id.is_(None)]
     run = await session.scalar(
         sa.select(ExtractionRun)
-        .where(
-            ExtractionRun.source_version_id == source_version_id,
-            ExtractionRun.pipeline_version == config.pipeline_version,
-        )
+        .where(*where)
         .with_for_update()
     )
     if run is None:
         run = ExtractionRun(
             source_version_id=source_version_id,
             ingestion_run_id=ingestion_run_id,
+            job_id=job_id,
+            attempt=attempt,
+            worker_id=worker_id,
             pipeline_version=config.pipeline_version,
             model_id=config.model_id,
             model_digest=config.model_digest,
@@ -135,9 +152,13 @@ async def _record_provider_failure(
     config: ExtractionConfig,
     ingestion_run_id: UUID | None,
     error: Exception,
+    claimed_job: object | None = None,
 ) -> None:
     async with session.begin():
-        run = await _get_or_create_run(session, source_version_id, config, ingestion_run_id)
+        run = await _get_or_create_run(
+            session, source_version_id, config, ingestion_run_id,
+            getattr(claimed_job, "id", None), getattr(claimed_job, "attempt", None), getattr(claimed_job, "worker_id", None),
+        )
         if isinstance(error, ProviderError):
             run.status = "retry" if error.retryable else "failed"
             run.error_code, run.error_detail = error.code, "Provider extraction failed"
@@ -169,11 +190,17 @@ def _date_is_supported(candidate: ExtractedCandidate, citations: list[CandidateC
 
 
 def _actors_are_supported(candidate: ExtractedCandidate, citations: list[CandidateCitationInput], parts: dict[UUID, ContentPart]) -> bool:
-    evidence = " ".join(
-        f"{parts[citation.part_id].author_label or ''} {parts[citation.part_id].text}".casefold()
-        for citation in citations
-    )
-    return all(_normalized(actor).casefold() in evidence for actor in candidate.actors)
+    labels = {parts[citation.part_id].author_label.casefold() for citation in citations if parts[citation.part_id].author_label}
+    tokens = set(re.findall(r"\b[\w'-]+\b", " ".join(parts[citation.part_id].text for citation in citations).casefold()))
+    return all(actor.casefold() in labels or set(re.findall(r"\b[\w'-]+\b", actor.casefold())) <= tokens for actor in candidate.actors)
+
+
+def _contradicts(left: str, right: str) -> bool:
+    """Small explicit heuristic: opposite polarity over two shared content words."""
+    left_tokens = set(re.findall(r"\b[\w'-]+\b", left.casefold()))
+    right_tokens = set(re.findall(r"\b[\w'-]+\b", right.casefold()))
+    negations = {"not", "no", "never", "without", "reject", "rejected"}
+    return bool((left_tokens & negations) != (right_tokens & negations) and len((left_tokens & right_tokens) - negations) >= 2)
 
 
 async def extract_candidates(
@@ -183,6 +210,7 @@ async def extract_candidates(
     extraction_config: ExtractionConfig,
     *,
     ingestion_run_id: UUID | None = None,
+    claimed_job: object | None = None,
 ) -> DraftSet:
     """Persist review-only candidates after exact evidence validation.
 
@@ -215,58 +243,84 @@ async def extract_candidates(
                 sa.select(ExtractionRun).where(ExtractionRun.id == existing.extraction_run_id)
             )
             return existing
-        await _get_or_create_run(session, source_version_id, extraction_config, ingestion_run_id)
-    try:
-        request = StructuredRequest(
-            schema=CandidateBatch,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Extract only cited research drafts. Return exact part IDs and short exact quotes. Do not infer relations.",
-                },
-                {"role": "user", "content": {"windows": _windows(parts, extraction_config.max_window_characters)}},
-            ],
+        await _get_or_create_run(
+            session, source_version_id, extraction_config, ingestion_run_id,
+            getattr(claimed_job, "id", None), getattr(claimed_job, "attempt", None), getattr(claimed_job, "worker_id", None),
         )
-        batch = await provider.generate(request)
+    try:
+        merged_items: list[ExtractedCandidate] = []
+        merged_relations: list[ExtractedRelation] = []
+        for window_index, window in enumerate(_windows(parts, extraction_config.max_window_characters)):
+            request = StructuredRequest(
+                schema=CandidateBatch,
+                messages=[
+                    {"role": "system", "content": "Extract only cited research drafts. Return exact part IDs and short exact quotes. Do not infer relations."},
+                    {"role": "user", "content": window},
+                ],
+            )
+            response = await provider.generate(request)
+            prefix = f"w{window_index}:"
+            merged_items.extend(item.model_copy(update={"candidate_key": prefix + item.candidate_key}) for item in response.items)
+            for relation in response.relations:
+                source = relation.source.model_copy(update={"candidate_key": prefix + relation.source.candidate_key} if relation.source.candidate_key else {})
+                target = relation.target.model_copy(update={"candidate_key": prefix + relation.target.candidate_key} if relation.target.candidate_key else {})
+                merged_relations.append(relation.model_copy(update={"source": source, "target": target}))
+        batch = CandidateBatch(items=merged_items, relations=merged_relations)
     except Exception as error:
-        await _record_provider_failure(session, source_version_id, extraction_config, ingestion_run_id, error)
+        await _record_provider_failure(session, source_version_id, extraction_config, ingestion_run_id, error, claimed_job)
         raise
 
     warnings: list[dict[str, object]] = []
     valid: list[tuple[ExtractedCandidate, list[CandidateCitationInput]]] = []
     seen: set[tuple[str, str, tuple[tuple[str, str], ...]]] = set()
+    canonical_by_identity: dict[tuple[str, str, tuple[tuple[str, str], ...]], str] = {}
     citation_claims: dict[tuple[str, tuple[tuple[str, str], ...]], str] = {}
+    type_claims: dict[str, list[str]] = {}
     keys: set[str] = set()
-    for candidate in batch.items:
+    aliases: dict[str, str] = {}
+    for ordinal, candidate in enumerate(batch.items):
         citations, issue = _validated_citations(candidate.citations, part_by_id)
         if issue:
-            warnings.append(_warning(issue, candidate_key=candidate.candidate_key))
+            warnings.append(_warning(issue, **_candidate_ref(ordinal, candidate.candidate_key)))
             continue
         if not _date_is_supported(candidate, citations, part_by_id):
-            warnings.append(_warning("unsupported_event_time", candidate_key=candidate.candidate_key))
+            warnings.append(_warning("unsupported_event_time", **_candidate_ref(ordinal, candidate.candidate_key)))
             continue
         if not _actors_are_supported(candidate, citations, part_by_id):
-            warnings.append(_warning("unsupported_actor", candidate_key=candidate.candidate_key))
+            warnings.append(_warning("unsupported_actor", **_candidate_ref(ordinal, candidate.candidate_key)))
             continue
         citation_identity = tuple(sorted((str(item.part_id), _normalized(item.quote)) for item in citations))
         identity = (candidate.candidate_type.value, _normalized(candidate.statement), citation_identity)
         if identity in seen:
-            warnings.append(_warning("duplicate_candidate", candidate_key=candidate.candidate_key))
+            aliases[candidate.candidate_key] = canonical_by_identity[identity]
+            warnings.append(_warning("duplicate_candidate", **_candidate_ref(ordinal, candidate.candidate_key)))
             continue
         conflict_key = (candidate.candidate_type.value, citation_identity)
         earlier = citation_claims.get(conflict_key)
         if earlier is not None and earlier != _normalized(candidate.statement):
-            warnings.append(_warning("possible_conflict", candidate_key=candidate.candidate_key))
+            warnings.append(_warning("possible_conflict", **_candidate_ref(ordinal, candidate.candidate_key)))
+        if any(_contradicts(statement, candidate.statement) for statement in type_claims.get(candidate.candidate_type.value, [])):
+            warnings.append(_warning("possible_conflict", **_candidate_ref(ordinal, candidate.candidate_key)))
         citation_claims[conflict_key] = _normalized(candidate.statement)
+        type_claims.setdefault(candidate.candidate_type.value, []).append(_normalized(candidate.statement))
         if candidate.candidate_key in keys:
-            warnings.append(_warning("duplicate_candidate_key", candidate_key=candidate.candidate_key))
+            warnings.append(_warning("duplicate_candidate_key", **_candidate_ref(ordinal, candidate.candidate_key)))
             continue
         seen.add(identity)
+        canonical_by_identity[identity] = candidate.candidate_key
         keys.add(candidate.candidate_key)
+        aliases[candidate.candidate_key] = candidate.candidate_key
         valid.append((candidate, citations))
 
     async with session.begin():
-        run = await _get_or_create_run(session, source_version_id, extraction_config, ingestion_run_id)
+        if claimed_job is not None:
+            from uri_backend.ingestion.queue import owned_claim
+
+            await owned_claim(session, claimed_job)
+        run = await _get_or_create_run(
+            session, source_version_id, extraction_config, ingestion_run_id,
+            getattr(claimed_job, "id", None), getattr(claimed_job, "attempt", None), getattr(claimed_job, "worker_id", None),
+        )
         draft = DraftSet(project_id=project_id, author_id=author_id, extraction_run_id=run.id, candidates=[])
         draft.extraction_run = run
         session.add(draft)
@@ -289,6 +343,9 @@ async def extract_candidates(
             await session.flush()
             session.add_all([CandidateCitation(candidate_id=persisted.id, content_part_id=item.part_id, quote=_normalized(item.quote)) for item in citations])
             by_key[candidate.candidate_key] = persisted
+        for alias, canonical in aliases.items():
+            if canonical in by_key:
+                by_key[alias] = by_key[canonical]
         await session.flush()
         records = {
             record.id: record

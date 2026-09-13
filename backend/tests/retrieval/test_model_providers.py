@@ -173,6 +173,7 @@ def test_settings_provider_factory_constructs_ollama_when_enabled() -> None:
         Settings(
             local_ai_enabled=True,
             generation_model="pilot-model",
+            generation_model_digest="sha256:pilot",
             embedding_model="pilot-embed",
             expected_embedding_dimension=384,
         )
@@ -188,6 +189,7 @@ def test_enabled_local_ai_requires_explicit_models_and_dimension() -> None:
     settings = Settings(
         local_ai_enabled=True,
         generation_model="pilot-model",
+        generation_model_digest="sha256:pilot",
         embedding_model="pilot-embed",
         expected_embedding_dimension=384,
     )
@@ -196,6 +198,7 @@ def test_enabled_local_ai_requires_explicit_models_and_dimension() -> None:
         Settings(
             local_ai_enabled=True,
             generation_model="   ",
+            generation_model_digest="sha256:pilot",
             embedding_model="pilot-embed",
             expected_embedding_dimension=384,
         )

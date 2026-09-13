@@ -260,6 +260,8 @@ async def fail_job(
     worker_id: str,
     error_code: str,
     error_detail: str | None = None,
+    *,
+    terminal: bool = False,
 ) -> IngestionJob:
     job, now, detail = (
         await _owned_job(session, job_id, worker_id),
@@ -267,7 +269,7 @@ async def fail_job(
         _bounded_detail(error_detail),
     )
     safe_code = _safe_error_code(error_code)
-    terminal = job.attempt >= job.max_attempts
+    terminal = terminal or job.attempt >= job.max_attempts
     await _finish_attempt(
         session, job, "failed" if terminal else "retry", safe_code, detail
     )

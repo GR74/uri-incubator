@@ -88,6 +88,7 @@ class DraftSet(Base):
     __table_args__ = (
         sa.CheckConstraint("status IN ('draft', 'pending_review', 'changes_requested', 'approved', 'published')", name="ck_draft_set_status"),
         sa.CheckConstraint("version > 0", name="ck_draft_set_version"),
+        sa.UniqueConstraint("extraction_run_id", name="uq_draft_set_extraction_run"),
     )
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)

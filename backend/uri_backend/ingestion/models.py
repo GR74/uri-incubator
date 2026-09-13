@@ -60,13 +60,16 @@ class ExtractionRun(Base):
 
     __tablename__ = "extraction_runs"
     __table_args__ = (
-        sa.UniqueConstraint("source_version_id", "pipeline_version", name="uq_extraction_run_source_pipeline"),
+        sa.UniqueConstraint("job_id", "attempt", name="uq_extraction_run_job_attempt"),
         sa.CheckConstraint("status IN ('queued', 'running', 'succeeded', 'retry', 'failed')", name="ck_extraction_run_status"),
     )
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)
     source_version_id: Mapped[UUID] = mapped_column(sa.ForeignKey("source_versions.id"), nullable=False)
-    ingestion_run_id: Mapped[UUID | None] = mapped_column(sa.ForeignKey("ingestion_runs.id"), unique=True)
+    ingestion_run_id: Mapped[UUID | None] = mapped_column(sa.ForeignKey("ingestion_runs.id"))
+    job_id: Mapped[UUID | None] = mapped_column(sa.ForeignKey("ingestion_jobs.id"))
+    attempt: Mapped[int | None] = mapped_column(sa.Integer)
+    worker_id: Mapped[str | None] = mapped_column(sa.String(200))
     pipeline_version: Mapped[str] = mapped_column(sa.String(100), nullable=False)
     model_id: Mapped[str] = mapped_column(sa.String(300), nullable=False)
     model_digest: Mapped[str] = mapped_column(sa.String(300), nullable=False)

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     local_ai_enabled: bool = False
     ollama_base_url: str = "http://127.0.0.1:11434"
     generation_model: str | None = None
+    generation_model_digest: str | None = None
     embedding_model: str | None = None
     expected_embedding_dimension: int | None = Field(default=None, gt=0)
     ollama_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
         if self.local_ai_enabled:
             required = {
                 "generation_model": self.generation_model,
+                "generation_model_digest": self.generation_model_digest,
                 "embedding_model": self.embedding_model,
                 "expected_embedding_dimension": self.expected_embedding_dimension,
             }

@@ -3,7 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import AliasChoices, BaseModel, Field, JsonValue, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 from uri_backend.knowledge.models import CandidateType, RelationType
 
@@ -14,7 +21,7 @@ class CandidatePayload(BaseModel):
 
 class CandidateCitationInput(BaseModel):
     part_id: UUID = Field(validation_alias=AliasChoices("part_id", "content_part_id"))
-    quote: str = Field(min_length=1)
+    quote: str = Field(min_length=1, pattern=r".*\S.*")
 
     @property
     def content_part_id(self) -> UUID:
@@ -24,13 +31,20 @@ class CandidateCitationInput(BaseModel):
 class ExtractedCandidate(BaseModel):
     candidate_key: str = Field(min_length=1, pattern=r".*\S.*")
     candidate_type: CandidateType
-    statement: str = Field(min_length=1)
+    statement: str = Field(min_length=1, pattern=r".*\S.*")
     payload: CandidatePayload = Field(default_factory=CandidatePayload)
     citations: list[CandidateCitationInput] = Field(min_length=1)
     event_time: datetime | None = None
     actors: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0, le=1)
     uncertainty: str | None = None
+
+    @field_validator("actors")
+    @classmethod
+    def actors_are_nonblank(cls, actors: list[str]) -> list[str]:
+        if any(not actor.strip() for actor in actors):
+            raise ValueError("actors must be nonblank")
+        return actors
 
 
 class ExtractedRelation(BaseModel):

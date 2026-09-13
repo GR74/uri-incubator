@@ -15,6 +15,7 @@ from uri_backend.ingestion.worker import build_extraction_handler
 from uri_backend.knowledge.extraction import (
     CandidateBatch,
     ExtractionConfig,
+    _windows,
     extract_candidates,
 )
 from uri_backend.knowledge.models import (
@@ -191,3 +192,13 @@ async def test_worker_handler_commits_draft_before_job_completion(
         assert await verification.scalar(sa.select(sa.func.count()).select_from(DraftSet)) == 1
         await complete_job(verification, claimed.id, claimed.worker_id)
         await verification.commit()
+
+
+def test_windows_split_one_oversized_part_with_stable_offsets() -> None:
+    """A context-sized part must not silently make an extraction request unbounded."""
+    part = ContentPart(id=uuid4(), ordinal=1, kind="paragraph", text="abcdefghij", locator={"line": 1}, source_version_id=uuid4())
+
+    windows = _windows([part], 4)
+
+    assert [window["parts"][0]["text"] for window in windows] == ["abcd", "efgh", "ij"]
+    assert [window["parts"][0]["offset_start"] for window in windows] == [0, 4, 8]
