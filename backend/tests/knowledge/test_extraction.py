@@ -11,7 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tests.fakes import FakeStructuredProvider
 from uri_backend.ingestion.models import IngestionJob
-from uri_backend.ingestion.queue import claim_next_job, complete_job, enqueue_extraction
+from uri_backend.ingestion.queue import (
+    ClaimedJob,
+    JobLeaseLost,
+    claim_next_job,
+    enqueue_extraction,
+)
 from uri_backend.ingestion.worker import build_extraction_handler
 from uri_backend.knowledge.extraction import (
     CandidateBatch,
@@ -184,11 +189,15 @@ async def test_worker_handler_commits_draft_before_job_completion(
     session, version, parts = seed_parts
     run = await enqueue_extraction(session, version.id)
     await session.commit()
+    await session.close()
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
     async with factory() as claimed_session:
-        claimed = await claim_next_job(claimed_session, "extract-test", lease_seconds=30)
+        job = await claimed_session.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
+        assert job is not None
+        job.status, job.worker_id, job.attempt = "running", "extract-test", 1
+        job.lease_expires_at = sa.func.now() + sa.text("interval '30 seconds'")
         await claimed_session.commit()
-    assert claimed is not None and claimed.run_id == run.id
+    claimed = ClaimedJob(job.id, run.id, 1, "extraction-v1", "extract-test")
     provider = FakeStructuredProvider(CandidateBatch(items=[ExtractedCandidate(
         candidate_key="worker", candidate_type="decision", statement="Use the revised method.",
         citations=[CandidateCitationInput(part_id=parts[0].id, quote="Use the revised method.")], confidence=0.9,
@@ -198,8 +207,6 @@ async def test_worker_handler_commits_draft_before_job_completion(
 
     async with factory() as verification:
         assert await verification.scalar(sa.select(sa.func.count()).select_from(DraftSet)) == 1
-        await complete_job(verification, claimed.id, claimed.worker_id)
-        await verification.commit()
 
 
 def test_windows_split_one_oversized_part_with_stable_offsets() -> None:
@@ -252,3 +259,28 @@ async def test_warning_does_not_store_model_key(seed_parts) -> None:
     provider = FakeStructuredProvider(CandidateBatch(items=[ExtractedCandidate(candidate_key=private, candidate_type="decision", statement="Use the revised method.", citations=[CandidateCitationInput(part_id=uuid4(), quote="Use")], confidence=0.9)]))
     draft = await extract_candidates(session, version.id, provider, TEST_CONFIG)
     assert private not in json.dumps([warning.__dict__ for warning in draft.validation_warnings])
+
+
+async def test_stale_extraction_attempt_cannot_publish_draft(db_engine, seed_parts) -> None:
+    """A worker that lost its lease must fail before the review-only transaction."""
+    session, version, parts = seed_parts
+    await enqueue_extraction(session, version.id)
+    await session.commit()
+    await session.close()
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as claim_session:
+        await claim_session.execute(sa.update(IngestionJob).values(available_at=sa.func.now() - sa.text("interval '1 second'")))
+        await claim_session.commit()
+        claimed = await claim_next_job(claim_session, "stale-extractor", 30)
+        await claim_session.commit()
+    assert claimed is not None
+    async with factory() as expire_session:
+        await expire_session.execute(sa.update(IngestionJob).where(IngestionJob.id == claimed.id).values(lease_expires_at=sa.func.now() - sa.text("interval '1 second'")))
+        await expire_session.commit()
+    provider = FakeStructuredProvider(CandidateBatch(items=[ExtractedCandidate(candidate_key="stale", candidate_type="decision", statement="Use the revised method.", citations=[CandidateCitationInput(part_id=parts[0].id, quote="Use the revised method.")], confidence=0.9)]))
+
+    with pytest.raises(JobLeaseLost):
+        await build_extraction_handler(factory, provider, TEST_CONFIG)(claimed)
+
+    async with factory() as verification:
+        assert await verification.scalar(sa.select(sa.func.count()).select_from(DraftSet)) == 0

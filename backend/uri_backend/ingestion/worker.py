@@ -24,7 +24,7 @@ from uri_backend.ingestion.adapters import (
     NotebookAdapter,
 )
 from uri_backend.ingestion.contracts import AdapterInput
-from uri_backend.ingestion.models import IngestionRun
+from uri_backend.ingestion.models import ExtractionRun, IngestionRun
 from uri_backend.ingestion.quality import (
     SourceContext,
     assess_source,
@@ -43,6 +43,7 @@ from uri_backend.ingestion.queue import (
 )
 from uri_backend.knowledge.extraction import ExtractionConfig, extract_candidates
 from uri_backend.retrieval.providers import (
+    ProviderError,
     StructuredGenerationProvider,
     build_model_provider,
 )
@@ -155,14 +156,16 @@ def build_extraction_handler(
             if source_version_id is None:
                 raise LookupError(f"Unknown ingestion run {job.run_id}")
             await session.commit()
-            await extract_candidates(
-                session,
-                source_version_id,
-                active_provider,
-                active_config,
-                ingestion_run_id=job.run_id,
-                claimed_job=job,
-            )
+            try:
+                await extract_candidates(session, source_version_id, active_provider, active_config, ingestion_run_id=job.run_id, claimed_job=job)
+            except Exception as error:
+                if not isinstance(error, ProviderError):
+                    await session.rollback()
+                    async with session.begin():
+                        run = await session.scalar(sa.select(ExtractionRun).where(ExtractionRun.job_id == job.id, ExtractionRun.attempt == job.attempt).with_for_update())
+                        if run is not None:
+                            run.status, run.error_code, run.error_detail, run.completed_at = "failed", "internal_error", "Extraction failed", sa.func.now()
+                raise
 
     return handler
 
