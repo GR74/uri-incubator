@@ -24,6 +24,7 @@ def _citation_table(name: str, owner_column: str, owner_table: str) -> None:
         sa.Column(owner_column, uuid, sa.ForeignKey(f"{owner_table}.id"), nullable=False),
         sa.Column("content_part_id", uuid, sa.ForeignKey("content_parts.id"), nullable=False),
         sa.Column("quote", sa.Text, nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.UniqueConstraint(owner_column, "content_part_id", "quote", name=f"uq_{name}_exact"),
         sa.CheckConstraint("length(btrim(quote)) > 0", name=f"ck_{name}_quote"),
     )
@@ -159,12 +160,13 @@ def upgrade() -> None:
 
     op.execute("""
         CREATE FUNCTION validate_knowledge_citation() RETURNS trigger LANGUAGE plpgsql AS $$
-        DECLARE owner_id uuid := CASE TG_TABLE_NAME
-            WHEN 'candidate_citations' THEN COALESCE(NEW.candidate_id, OLD.candidate_id)
-            WHEN 'draft_relation_citations' THEN COALESCE(NEW.draft_relation_id, OLD.draft_relation_id)
-            WHEN 'record_citations' THEN COALESCE(NEW.record_version_id, OLD.record_version_id)
-            ELSE COALESCE(NEW.relation_id, OLD.relation_id) END;
+        DECLARE owner_id uuid;
         BEGIN
+          IF TG_TABLE_NAME = 'candidate_citations' THEN owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.candidate_id ELSE NEW.candidate_id END;
+          ELSIF TG_TABLE_NAME = 'draft_relation_citations' THEN owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.draft_relation_id ELSE NEW.draft_relation_id END;
+          ELSIF TG_TABLE_NAME = 'record_citations' THEN owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.record_version_id ELSE NEW.record_version_id END;
+          ELSE owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.relation_id ELSE NEW.relation_id END;
+          END IF;
           IF TG_TABLE_NAME = 'candidate_citations' AND EXISTS (
             SELECT 1 FROM candidate_citations cc JOIN draft_candidates dc ON dc.id = cc.candidate_id
             JOIN draft_sets ds ON ds.id = dc.draft_set_id JOIN content_parts cp ON cp.id = cc.content_part_id
@@ -213,12 +215,13 @@ def upgrade() -> None:
         op.execute(f"CREATE CONSTRAINT TRIGGER {table}_integrity AFTER INSERT OR UPDATE ON {table} DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION validate_knowledge_owner()")
     op.execute("""
         CREATE FUNCTION validate_knowledge_citation_presence() RETURNS trigger LANGUAGE plpgsql AS $$
-        DECLARE owner_id uuid := CASE TG_TABLE_NAME
-            WHEN 'candidate_citations' THEN COALESCE(NEW.candidate_id, OLD.candidate_id)
-            WHEN 'draft_relation_citations' THEN COALESCE(NEW.draft_relation_id, OLD.draft_relation_id)
-            WHEN 'record_citations' THEN COALESCE(NEW.record_version_id, OLD.record_version_id)
-            ELSE COALESCE(NEW.relation_id, OLD.relation_id) END;
+        DECLARE owner_id uuid;
         BEGIN
+          IF TG_TABLE_NAME = 'candidate_citations' THEN owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.candidate_id ELSE NEW.candidate_id END;
+          ELSIF TG_TABLE_NAME = 'draft_relation_citations' THEN owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.draft_relation_id ELSE NEW.draft_relation_id END;
+          ELSIF TG_TABLE_NAME = 'record_citations' THEN owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.record_version_id ELSE NEW.record_version_id END;
+          ELSE owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.relation_id ELSE NEW.relation_id END;
+          END IF;
           IF TG_TABLE_NAME = 'candidate_citations' AND EXISTS (SELECT 1 FROM draft_candidates WHERE id = owner_id) AND NOT EXISTS (SELECT 1 FROM candidate_citations WHERE candidate_id = owner_id) THEN RAISE EXCEPTION 'draft candidate requires a citation'; END IF;
           IF TG_TABLE_NAME = 'draft_relation_citations' AND EXISTS (SELECT 1 FROM draft_relations WHERE id = owner_id) AND NOT EXISTS (SELECT 1 FROM draft_relation_citations WHERE draft_relation_id = owner_id) THEN RAISE EXCEPTION 'draft relation requires a citation'; END IF;
           IF TG_TABLE_NAME = 'record_citations' AND EXISTS (SELECT 1 FROM record_versions WHERE id = owner_id) AND NOT EXISTS (SELECT 1 FROM record_citations WHERE record_version_id = owner_id) THEN RAISE EXCEPTION 'record version requires a citation'; END IF;

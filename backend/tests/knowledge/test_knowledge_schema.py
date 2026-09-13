@@ -230,5 +230,11 @@ async def test_supersession_links_later_version_of_same_record(
         second = RecordVersion(record_id=record.id, version=2, statement="Corrected.", payload={})
         session.add_all([first, second])
         await session.flush()
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        session.add_all([
+            RecordCitation(record_version_id=first.id, content_part_id=part_id, quote="The analysis produced a difference."),
+            RecordCitation(record_version_id=second.id, content_part_id=part_id, quote="The analysis produced a difference."),
+        ])
         session.add(Supersession(predecessor_version_id=first.id, successor_version_id=second.id))
         await session.commit()

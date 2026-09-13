@@ -53,13 +53,17 @@ class ReviewDecision(StrEnum):
     REQUEST_CHANGES = "request_changes"
 
 
+def _enum_values(enum_class: type[StrEnum]) -> list[str]:
+    return [member.value for member in enum_class]
+
+
 class DraftSet(Base):
     __tablename__ = "draft_sets"
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(sa.ForeignKey("projects.id"), nullable=False)
     author_id: Mapped[UUID] = mapped_column(sa.ForeignKey("users.id"), nullable=False)
-    status: Mapped[DraftStatus] = mapped_column(sa.Enum(DraftStatus, native_enum=False, create_constraint=True), nullable=False, default=DraftStatus.DRAFT)
+    status: Mapped[DraftStatus] = mapped_column(sa.Enum(DraftStatus, native_enum=False, create_constraint=True, values_callable=_enum_values), nullable=False, default=DraftStatus.DRAFT)
     version: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), onupdate=sa.func.now())
@@ -72,14 +76,14 @@ class DraftCandidate(Base):
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)
     draft_set_id: Mapped[UUID] = mapped_column(sa.ForeignKey("draft_sets.id", ondelete="CASCADE"), nullable=False)
-    candidate_type: Mapped[CandidateType] = mapped_column(sa.Enum(CandidateType, native_enum=False, create_constraint=True), nullable=False)
+    candidate_type: Mapped[CandidateType] = mapped_column(sa.Enum(CandidateType, native_enum=False, create_constraint=True, values_callable=_enum_values), nullable=False)
     statement: Mapped[str] = mapped_column(sa.Text, nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
     event_time: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     actors: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     confidence: Mapped[float] = mapped_column(sa.Float, nullable=False)
     uncertainty: Mapped[str | None] = mapped_column(sa.Text)
-    status: Mapped[DraftStatus] = mapped_column(sa.Enum(DraftStatus, native_enum=False, create_constraint=True), nullable=False, default=DraftStatus.DRAFT)
+    status: Mapped[DraftStatus] = mapped_column(sa.Enum(DraftStatus, native_enum=False, create_constraint=True, values_callable=_enum_values), nullable=False, default=DraftStatus.DRAFT)
     version: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     draft_set: Mapped[DraftSet] = relationship(back_populates="candidates")
@@ -106,7 +110,7 @@ class DraftRelation(Base):
     draft_set_id: Mapped[UUID] = mapped_column(sa.ForeignKey("draft_sets.id", ondelete="CASCADE"), nullable=False)
     source_candidate_id: Mapped[UUID] = mapped_column(sa.ForeignKey("draft_candidates.id"), nullable=False)
     target_candidate_id: Mapped[UUID] = mapped_column(sa.ForeignKey("draft_candidates.id"), nullable=False)
-    relation_type: Mapped[RelationType] = mapped_column(sa.Enum(RelationType, native_enum=False, create_constraint=True), nullable=False)
+    relation_type: Mapped[RelationType] = mapped_column(sa.Enum(RelationType, native_enum=False, create_constraint=True, values_callable=_enum_values), nullable=False)
     statement: Mapped[str | None] = mapped_column(sa.Text)
     confidence: Mapped[float | None] = mapped_column(sa.Float)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
@@ -132,7 +136,7 @@ class Review(Base):
     draft_set_id: Mapped[UUID] = mapped_column(sa.ForeignKey("draft_sets.id"), nullable=False)
     draft_version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     reviewer_id: Mapped[UUID] = mapped_column(sa.ForeignKey("users.id"), nullable=False)
-    decision: Mapped[ReviewDecision] = mapped_column(sa.Enum(ReviewDecision, native_enum=False, create_constraint=True), nullable=False)
+    decision: Mapped[ReviewDecision] = mapped_column(sa.Enum(ReviewDecision, native_enum=False, create_constraint=True, values_callable=_enum_values), nullable=False)
     comment: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
@@ -142,7 +146,7 @@ class Record(Base):
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(sa.ForeignKey("projects.id"), nullable=False)
-    record_type: Mapped[CandidateType] = mapped_column(sa.Enum(CandidateType, native_enum=False, create_constraint=True), nullable=False)
+    record_type: Mapped[CandidateType] = mapped_column(sa.Enum(CandidateType, native_enum=False, create_constraint=True, values_callable=_enum_values), nullable=False)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
@@ -181,7 +185,7 @@ class Relation(Base):
     project_id: Mapped[UUID] = mapped_column(sa.ForeignKey("projects.id"), nullable=False)
     source_record_id: Mapped[UUID] = mapped_column(sa.ForeignKey("records.id"), nullable=False)
     target_record_id: Mapped[UUID] = mapped_column(sa.ForeignKey("records.id"), nullable=False)
-    relation_type: Mapped[RelationType] = mapped_column(sa.Enum(RelationType, native_enum=False, create_constraint=True), nullable=False)
+    relation_type: Mapped[RelationType] = mapped_column(sa.Enum(RelationType, native_enum=False, create_constraint=True, values_callable=_enum_values), nullable=False)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
