@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,15 +16,22 @@ from uri_backend.ingestion.worker import build_extraction_handler
 from uri_backend.knowledge.extraction import (
     CandidateBatch,
     ExtractionConfig,
+    _contradicts,
     _windows,
     extract_candidates,
 )
 from uri_backend.knowledge.models import (
     CandidateCitation,
+    DraftRelation,
     DraftSet,
     Record,
 )
-from uri_backend.knowledge.schemas import CandidateCitationInput, ExtractedCandidate
+from uri_backend.knowledge.schemas import (
+    CandidateCitationInput,
+    ExtractedCandidate,
+    ExtractedRelation,
+    RelationEndpointReference,
+)
 from uri_backend.projects.models import Project, User
 from uri_backend.sources.models import Artifact, ContentPart, Source, SourceVersion
 
@@ -202,3 +210,45 @@ def test_windows_split_one_oversized_part_with_stable_offsets() -> None:
 
     assert [window["parts"][0]["text"] for window in windows] == ["abcd", "efgh", "ij"]
     assert [window["parts"][0]["offset_start"] for window in windows] == [0, 4, 8]
+
+
+async def test_extraction_calls_provider_once_per_bounded_window(seed_parts) -> None:
+    session, version, _ = seed_parts
+    provider = FakeStructuredProvider(CandidateBatch())
+    await extract_candidates(session, version.id, provider, replace(TEST_CONFIG, max_window_characters=20))
+    assert len(provider.requests) > 1
+    assert all(len(request.messages[1]["content"]["parts"][0]["text"]) <= 20 for request in provider.requests)
+
+
+async def test_duplicate_key_alias_preserves_relation(seed_parts) -> None:
+    session, version, parts = seed_parts
+    citation = CandidateCitationInput(part_id=parts[0].id, quote="Use the revised method.")
+    provider = FakeStructuredProvider(CandidateBatch(
+        items=[
+            ExtractedCandidate(candidate_key="one", candidate_type="decision", statement="Use the revised method.", citations=[citation], confidence=0.9),
+            ExtractedCandidate(candidate_key="two", candidate_type="decision", statement="Use the revised method.", citations=[citation], confidence=0.9),
+            ExtractedCandidate(candidate_key="target", candidate_type="result", statement="The synthetic ClearerMind analysis reported a difference.", citations=[CandidateCitationInput(part_id=parts[0].id, quote="reported a difference")], confidence=0.8),
+        ],
+        relations=[ExtractedRelation(source=RelationEndpointReference(candidate_key="two"), target=RelationEndpointReference(candidate_key="target"), relation_type="supports", citations=[citation])],
+    ))
+    await extract_candidates(session, version.id, provider, TEST_CONFIG)
+    assert await session.scalar(sa.select(sa.func.count()).select_from(DraftRelation)) == 1
+
+
+def test_schema_and_conflict_boundaries_reject_blanks_without_substring_guessing() -> None:
+    with pytest.raises(ValueError):
+        CandidateCitationInput(part_id=uuid4(), quote="  ")
+    with pytest.raises(ValueError):
+        ExtractedCandidate(candidate_key="x", candidate_type="decision", statement=" ", citations=[CandidateCitationInput(part_id=uuid4(), quote="evidence")], confidence=0.5)
+    with pytest.raises(ValueError):
+        ExtractedCandidate(candidate_key="x", candidate_type="decision", statement="evidence", actors=[" "], citations=[CandidateCitationInput(part_id=uuid4(), quote="evidence")], confidence=0.5)
+    assert _contradicts("Use revised method", "Do not use revised method")
+    assert not _contradicts("Use revised method", "Use alternative method")
+
+
+async def test_warning_does_not_store_model_key(seed_parts) -> None:
+    session, version, _ = seed_parts
+    private = "PRIVATE synthetic ClearerMind phrase"
+    provider = FakeStructuredProvider(CandidateBatch(items=[ExtractedCandidate(candidate_key=private, candidate_type="decision", statement="Use the revised method.", citations=[CandidateCitationInput(part_id=uuid4(), quote="Use")], confidence=0.9)]))
+    draft = await extract_candidates(session, version.id, provider, TEST_CONFIG)
+    assert private not in json.dumps([warning.__dict__ for warning in draft.validation_warnings])
