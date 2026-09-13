@@ -92,6 +92,109 @@ async def source_version(db_engine: AsyncEngine) -> SourceVersion:
         return result
 
 
+@pytest.fixture(params=[CandidateCitation, DraftRelationCitation], ids=["candidate", "relation"])
+async def editable_draft_citations(db_engine: AsyncEngine, source_version: SourceVersion, request):
+    """Two citations on one draft owner and a citation on another valid owner."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        draft_set = DraftSet(project_id=source_version.project_id, author_id=source_version.created_by)
+        first_candidate = DraftCandidate(draft_set=draft_set, candidate_type="result", statement="One.", payload={}, confidence=0.8)
+        second_candidate = DraftCandidate(draft_set=draft_set, candidate_type="result", statement="Two.", payload={}, confidence=0.8)
+        session.add_all([draft_set, first_candidate, second_candidate])
+        await session.flush()
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        first_candidate_citation = CandidateCitation(candidate_id=first_candidate.id, content_part_id=part_id, quote="First evidence.")
+        second_candidate_citation = CandidateCitation(candidate_id=second_candidate.id, content_part_id=part_id, quote="Other evidence.")
+        session.add_all([first_candidate_citation, second_candidate_citation])
+        if request.param is CandidateCitation:
+            first, other = first_candidate_citation, second_candidate_citation
+            spare = CandidateCitation(candidate_id=first_candidate.id, content_part_id=part_id, quote="Retained evidence.")
+        else:
+            first_relation = DraftRelation(draft_set_id=draft_set.id, source_candidate_id=first_candidate.id, target_candidate_id=second_candidate.id, relation_type="supports")
+            second_relation = DraftRelation(draft_set_id=draft_set.id, source_candidate_id=second_candidate.id, target_candidate_id=first_candidate.id, relation_type="supports")
+            session.add_all([first_relation, second_relation])
+            await session.flush()
+            first = DraftRelationCitation(draft_relation_id=first_relation.id, content_part_id=part_id, quote="First evidence.")
+            spare = DraftRelationCitation(draft_relation_id=first_relation.id, content_part_id=part_id, quote="Retained evidence.")
+            other = DraftRelationCitation(draft_relation_id=second_relation.id, content_part_id=part_id, quote="Other evidence.")
+        session.add_all([first, spare, other])
+        await session.commit()
+        return first, spare, other
+
+
+async def test_orm_allows_draft_citation_quote_and_content_part_edits(
+    db_engine: AsyncEngine, source_version: SourceVersion, editable_draft_citations
+) -> None:
+    """A published-only ORM guard must not block corrections to draft evidence."""
+    original, _, _ = editable_draft_citations
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        replacement = ContentPart(source_version_id=source_version.id, ordinal=2, kind="paragraph", text="Corrected evidence.", locator={"line_start": 2, "line_end": 2})
+        session.add(replacement)
+        await session.flush()
+        citation = await session.get(type(original), original.id)
+        assert citation is not None
+        citation.quote = "Corrected evidence."
+        citation.content_part_id = replacement.id
+        await session.commit()
+        await session.refresh(citation)
+        assert citation.quote == "Corrected evidence."
+        assert citation.content_part_id == replacement.id
+
+
+async def test_orm_allows_nonfinal_draft_citation_delete_but_preserves_final_citation(
+    db_engine: AsyncEngine, editable_draft_citations
+) -> None:
+    """Draft deletes reach PostgreSQL, where only loss of the final citation fails."""
+    original, spare, _ = editable_draft_citations
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        citation = await session.get(type(original), original.id)
+        assert citation is not None
+        await session.delete(citation)
+        await session.commit()
+        assert await session.get(type(original), original.id) is None
+        retained = await session.get(type(spare), spare.id)
+        assert retained is not None
+        await session.delete(retained)
+        with pytest.raises(sa.exc.DBAPIError, match="requires a citation"):
+            await session.commit()
+        await session.rollback()
+        assert await session.get(type(spare), spare.id) is not None
+
+
+async def test_orm_rejects_draft_citation_owner_reparenting(
+    db_engine: AsyncEngine, editable_draft_citations
+) -> None:
+    """Removing the selective owner guard must expose the wrong database error."""
+    original, _, other = editable_draft_citations
+    owner_key = "candidate_id" if isinstance(original, CandidateCitation) else "draft_relation_id"
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        citation = await session.get(type(original), original.id)
+        assert citation is not None
+        setattr(citation, owner_key, getattr(other, owner_key))
+        with pytest.raises(ImmutableRecordError):
+            await session.commit()
+        await session.rollback()
+        await session.refresh(citation)
+        assert getattr(citation, owner_key) == getattr(original, owner_key)
+
+
+@pytest.mark.parametrize("editable_draft_citations", [DraftRelationCitation], indirect=True)
+async def test_database_rejects_draft_relation_set_reassignment(
+    db_engine: AsyncEngine, source_version: SourceVersion, editable_draft_citations
+) -> None:
+    """Changing a draft relation's set must fail even when SQL bypasses ORM guards."""
+    citation, _, _ = editable_draft_citations
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        other_project = Project(name="Other draft project")
+        session.add(other_project)
+        await session.flush()
+        other_set = DraftSet(project_id=other_project.id, author_id=source_version.created_by)
+        session.add(other_set)
+        await session.commit()
+        with pytest.raises(sa.exc.DBAPIError, match="draft relation set identity is immutable"):
+            await session.execute(sa.update(DraftRelation).where(DraftRelation.id == citation.draft_relation_id).values(draft_set_id=other_set.id))
+
+
 async def test_evidence_candidate_requires_a_citation(
     db_engine: AsyncEngine, source_version: SourceVersion
 ) -> None:
@@ -210,6 +313,42 @@ async def test_published_record_versions_and_citations_are_append_only(
         await session.rollback()
 
         await session.delete(citation)
+        with pytest.raises(ImmutableRecordError):
+            await session.commit()
+
+
+@pytest.mark.parametrize("citation_model", [RecordCitation, RelationCitation], ids=["record", "relation"])
+@pytest.mark.parametrize("mutation", ["update", "delete"])
+async def test_published_citation_orm_guards_remain_append_only(
+    db_engine: AsyncEngine, source_version: SourceVersion, citation_model, mutation: str
+) -> None:
+    """Restoring draft edits must not permit published citation updates or deletes."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        if citation_model is RecordCitation:
+            record = Record(project_id=source_version.project_id, record_type="result")
+            session.add(record)
+            await session.flush()
+            version = RecordVersion(record_id=record.id, version=1, statement="Published.", payload={})
+            session.add(version)
+            await session.flush()
+            citation = RecordCitation(record_version_id=version.id, content_part_id=part_id, quote="Published evidence.")
+        else:
+            first = GraphEntity(project_id=source_version.project_id, entity_type="project", native_id=source_version.project_id)
+            second = GraphEntity(project_id=source_version.project_id, entity_type="source", native_id=source_version.source_id)
+            session.add_all([first, second])
+            await session.flush()
+            relation = Relation(project_id=source_version.project_id, source_entity_id=first.id, target_entity_id=second.id, relation_type="cites")
+            session.add(relation)
+            await session.flush()
+            citation = RelationCitation(relation_id=relation.id, content_part_id=part_id, quote="Published evidence.")
+        session.add(citation)
+        await session.commit()
+        if mutation == "update":
+            citation.quote = "Rewritten evidence."
+        else:
+            await session.delete(citation)
         with pytest.raises(ImmutableRecordError):
             await session.commit()
 

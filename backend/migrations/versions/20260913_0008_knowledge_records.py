@@ -266,11 +266,17 @@ def upgrade() -> None:
     op.execute("""
         CREATE FUNCTION prevent_knowledge_identity_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
-          IF TG_TABLE_NAME = 'draft_sets' AND NEW.project_id <> OLD.project_id THEN RAISE EXCEPTION 'draft set project identity is immutable'; END IF;
-          IF TG_TABLE_NAME = 'draft_candidates' AND NEW.draft_set_id <> OLD.draft_set_id THEN RAISE EXCEPTION 'draft candidate set identity is immutable'; END IF;
-          IF TG_TABLE_NAME = 'draft_relations' AND NEW.draft_set_id <> OLD.draft_set_id THEN RAISE EXCEPTION 'draft relation set identity is immutable'; END IF;
-          IF TG_TABLE_NAME = 'records' AND (NEW.project_id <> OLD.project_id OR NEW.record_type <> OLD.record_type) THEN RAISE EXCEPTION 'record identity is immutable'; END IF;
-          IF TG_TABLE_NAME = 'graph_entities' AND (NEW.project_id <> OLD.project_id OR NEW.entity_type <> OLD.entity_type OR NEW.native_id <> OLD.native_id) THEN RAISE EXCEPTION 'graph entity identity is immutable'; END IF;
+          IF TG_TABLE_NAME = 'draft_sets' THEN
+            IF NEW.project_id <> OLD.project_id THEN RAISE EXCEPTION 'draft set project identity is immutable'; END IF;
+          ELSIF TG_TABLE_NAME = 'draft_candidates' THEN
+            IF NEW.draft_set_id <> OLD.draft_set_id THEN RAISE EXCEPTION 'draft candidate set identity is immutable'; END IF;
+          ELSIF TG_TABLE_NAME = 'draft_relations' THEN
+            IF NEW.draft_set_id <> OLD.draft_set_id THEN RAISE EXCEPTION 'draft relation set identity is immutable'; END IF;
+          ELSIF TG_TABLE_NAME = 'records' THEN
+            IF NEW.project_id <> OLD.project_id OR NEW.record_type <> OLD.record_type THEN RAISE EXCEPTION 'record identity is immutable'; END IF;
+          ELSIF TG_TABLE_NAME = 'graph_entities' THEN
+            IF NEW.project_id <> OLD.project_id OR NEW.entity_type <> OLD.entity_type OR NEW.native_id <> OLD.native_id THEN RAISE EXCEPTION 'graph entity identity is immutable'; END IF;
+          END IF;
           RETURN NEW;
         END; $$
     """)

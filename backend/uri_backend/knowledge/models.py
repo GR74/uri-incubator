@@ -262,6 +262,16 @@ def _reject_published_mutation(*_: object) -> None:
     raise ImmutableRecordError("Published record versions and citations are immutable.")
 
 
-for _model in (CandidateCitation, DraftRelationCitation, GraphEntity, Record, RecordVersion, RecordCitation, Relation, RelationCitation, Review, Supersession):
+@event.listens_for(CandidateCitation, "before_update")
+@event.listens_for(DraftRelationCitation, "before_update")
+def _reject_draft_citation_reparent(
+    _mapper: object, _connection: object, target: CandidateCitation | DraftRelationCitation
+) -> None:
+    owner_key = "candidate_id" if isinstance(target, CandidateCitation) else "draft_relation_id"
+    if sa.inspect(target).attrs[owner_key].history.has_changes():
+        raise ImmutableRecordError("Draft citation owner is immutable.")
+
+
+for _model in (GraphEntity, Record, RecordVersion, RecordCitation, Relation, RelationCitation, Review, Supersession):
     event.listen(_model, "before_update", _reject_published_mutation)
     event.listen(_model, "before_delete", _reject_published_mutation)
