@@ -317,6 +317,9 @@ async def test_database_rejects_published_identity_and_review_mutation(
             await session.execute(sa.update(Record).where(Record.id == record.id).values(project_id=other.id))
         await session.rollback()
         with pytest.raises(sa.exc.DBAPIError, match="immutable"):
+            await session.execute(sa.update(Review).where(Review.id == review_id).values(comment="rewritten"))
+        await session.rollback()
+        with pytest.raises(sa.exc.DBAPIError, match="immutable"):
             await session.execute(sa.delete(Review).where(Review.id == review_id))
 
 
@@ -358,19 +361,36 @@ async def test_concurrent_citation_deletes_cannot_leave_an_evidence_candidate_un
 
 
 async def test_task_one_orm_metadata_matches_migrated_postgres_schema(db_engine: AsyncEngine) -> None:
-    """A missing column or FK policy in ORM metadata must be caught before autogenerate drifts."""
+    """Task-1 models mirror PostgreSQL columns, types, defaults, FKs, and named constraints."""
     table_names = {
         "draft_sets", "draft_candidates", "candidate_citations", "draft_relations",
         "draft_relation_citations", "reviews", "graph_entities", "records",
         "record_versions", "record_citations", "relations", "relation_citations", "supersessions",
     }
     async with db_engine.connect() as connection:
+        def normalized(value: object | None) -> str | None:
+            if value is None:
+                return None
+            return " ".join(
+                str(value).lower()
+                .replace("::character varying", "")
+                .replace("timestamp with time zone", "timestamp")
+                .replace("double precision", "float")
+                .replace("'", "")
+                .split()
+            )
+
         def inspect_schema(sync_connection):
             inspector = sa.inspect(sync_connection)
             return {
                 table: {
-                    "columns": {column["name"]: column["nullable"] for column in inspector.get_columns(table)},
+                    "columns": {
+                        column["name"]: (column["nullable"], normalized(column["type"]), normalized(column.get("default")))
+                        for column in inspector.get_columns(table)
+                    },
                     "foreign_keys": {(foreign_key["constrained_columns"][0], foreign_key["referred_table"], foreign_key.get("options", {}).get("ondelete")) for foreign_key in inspector.get_foreign_keys(table)},
+                    "unique_constraints": {(constraint["name"], tuple(constraint["column_names"])) for constraint in inspector.get_unique_constraints(table)},
+                    "check_constraints": {constraint["name"] for constraint in inspector.get_check_constraints(table)},
                 }
                 for table in table_names
             }
@@ -378,9 +398,116 @@ async def test_task_one_orm_metadata_matches_migrated_postgres_schema(db_engine:
     assert table_names <= set(Base.metadata.tables)
     for table_name in table_names:
         model = Base.metadata.tables[table_name]
-        assert {column.name: column.nullable for column in model.columns} == database[table_name]["columns"]
+        model_columns = {
+            column.name: (column.nullable, normalized(column.type.compile(dialect=sa.dialects.postgresql.dialect())), normalized(column.server_default.arg if column.server_default else None))
+            for column in model.columns
+        }
+        assert model_columns == database[table_name]["columns"]
         model_foreign_keys = {
             (foreign_key.elements[0].parent.name, foreign_key.elements[0].column.table.name, foreign_key.ondelete)
             for foreign_key in model.foreign_key_constraints
         }
         assert model_foreign_keys == database[table_name]["foreign_keys"]
+        assert {(constraint.name, tuple(column.name for column in constraint.columns)) for constraint in model.constraints if isinstance(constraint, sa.UniqueConstraint)} == database[table_name]["unique_constraints"]
+        assert {constraint.name for constraint in model.constraints if isinstance(constraint, sa.CheckConstraint)} == database[table_name]["check_constraints"]
+
+
+async def test_database_rejects_draft_citation_reparenting_and_phantom_graph_entities(
+    db_engine: AsyncEngine, source_version: SourceVersion
+) -> None:
+    """Moving evidence or inventing a typed node must fail at the database boundary."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        draft_set = DraftSet(project_id=source_version.project_id, author_id=source_version.created_by)
+        session.add(draft_set)
+        await session.flush()
+        first = DraftCandidate(draft_set_id=draft_set.id, candidate_type="result", statement="One.", payload={}, confidence=0.8)
+        second = DraftCandidate(draft_set_id=draft_set.id, candidate_type="result", statement="Two.", payload={}, confidence=0.8)
+        session.add_all([first, second])
+        await session.flush()
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        first_citation = CandidateCitation(candidate_id=first.id, content_part_id=part_id, quote="The analysis produced a difference.")
+        second_citation = CandidateCitation(candidate_id=second.id, content_part_id=part_id, quote="Second.")
+        session.add_all([first_citation, second_citation])
+        await session.commit()
+        with pytest.raises(sa.exc.DBAPIError, match="owner is immutable"):
+            await session.execute(sa.update(CandidateCitation).where(CandidateCitation.id == first_citation.id).values(candidate_id=second.id))
+        await session.rollback()
+        session.add(GraphEntity(project_id=source_version.project_id, entity_type="record", native_id=uuid4()))
+        with pytest.raises(sa.exc.DBAPIError, match="record graph entity"):
+            await session.commit()
+
+
+async def test_database_rejects_draft_relation_citation_reparenting(
+    db_engine: AsyncEngine, source_version: SourceVersion
+) -> None:
+    """Draft-relation evidence cannot be moved between independently cited edges."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        draft_set = DraftSet(project_id=source_version.project_id, author_id=source_version.created_by)
+        first = DraftCandidate(draft_set=draft_set, candidate_type="result", statement="One.", payload={}, confidence=0.8)
+        second = DraftCandidate(draft_set=draft_set, candidate_type="result", statement="Two.", payload={}, confidence=0.8)
+        session.add_all([draft_set, first, second])
+        await session.flush()
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        first_candidate_citation = CandidateCitation(candidate_id=first.id, content_part_id=part_id, quote="The analysis produced a difference.")
+        second_candidate_citation = CandidateCitation(candidate_id=second.id, content_part_id=part_id, quote="Second candidate evidence.")
+        first_relation = DraftRelation(draft_set_id=draft_set.id, source_candidate_id=first.id, target_candidate_id=second.id, relation_type="supports")
+        second_relation = DraftRelation(draft_set_id=draft_set.id, source_candidate_id=second.id, target_candidate_id=first.id, relation_type="supports")
+        session.add_all([first_candidate_citation, second_candidate_citation, first_relation, second_relation])
+        await session.flush()
+        citation = DraftRelationCitation(draft_relation_id=first_relation.id, content_part_id=part_id, quote="Relation evidence.")
+        session.add_all([citation, DraftRelationCitation(draft_relation_id=second_relation.id, content_part_id=part_id, quote="Other relation evidence.")])
+        await session.commit()
+        with pytest.raises(sa.exc.DBAPIError, match="owner is immutable"):
+            await session.execute(sa.update(DraftRelationCitation).where(DraftRelationCitation.id == citation.id).values(draft_relation_id=second_relation.id))
+
+
+async def test_database_rejects_backward_and_cross_record_supersessions(
+    db_engine: AsyncEngine, source_version: SourceVersion
+) -> None:
+    """Supersession may only point forward within one stable record."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        first_record = Record(project_id=source_version.project_id, record_type="result")
+        second_record = Record(project_id=source_version.project_id, record_type="result")
+        session.add_all([first_record, second_record])
+        await session.flush()
+        first = RecordVersion(record_id=first_record.id, version=1, statement="Old.", payload={})
+        later = RecordVersion(record_id=first_record.id, version=2, statement="New.", payload={})
+        other = RecordVersion(record_id=second_record.id, version=1, statement="Other.", payload={})
+        session.add_all([first, later, other])
+        await session.flush()
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        session.add_all([
+            RecordCitation(record_version_id=first.id, content_part_id=part_id, quote="The analysis produced a difference."),
+            RecordCitation(record_version_id=later.id, content_part_id=part_id, quote="The analysis produced a difference."),
+            RecordCitation(record_version_id=other.id, content_part_id=part_id, quote="The analysis produced a difference."),
+        ])
+        session.add(Supersession(predecessor_version_id=later.id, successor_version_id=first.id))
+        with pytest.raises(sa.exc.DBAPIError, match="supersession"):
+            await session.commit()
+
+
+async def test_database_rejects_cross_record_supersession(
+    db_engine: AsyncEngine, source_version: SourceVersion
+) -> None:
+    """Direct SQL cannot create a supersession between unrelated stable records."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        first_record = Record(project_id=source_version.project_id, record_type="result")
+        second_record = Record(project_id=source_version.project_id, record_type="result")
+        session.add_all([first_record, second_record])
+        await session.flush()
+        first = RecordVersion(record_id=first_record.id, version=1, statement="One.", payload={})
+        second = RecordVersion(record_id=second_record.id, version=2, statement="Two.", payload={})
+        session.add_all([first, second])
+        await session.flush()
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        session.add_all([
+            RecordCitation(record_version_id=first.id, content_part_id=part_id, quote="The analysis produced a difference."),
+            RecordCitation(record_version_id=second.id, content_part_id=part_id, quote="The analysis produced a difference."),
+            Supersession(predecessor_version_id=first.id, successor_version_id=second.id),
+        ])
+        with pytest.raises(sa.exc.DBAPIError, match="supersession"):
+            await session.commit()
