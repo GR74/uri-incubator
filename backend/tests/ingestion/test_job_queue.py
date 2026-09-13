@@ -446,11 +446,51 @@ async def test_worker_renews_lease_during_long_handler(db_engine, source_version
     )
     try:
         await asyncio.wait_for(started.wait(), 3)
-        await asyncio.sleep(1.3)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 1.3
+        samples = []
+        clock_crossed_expiry = False
+        while loop.time() < deadline:
+            host_before = loop.time()
+            async with factory() as session:
+                job, database_now = (
+                    await session.execute(
+                        sa.select(IngestionJob, sa.func.clock_timestamp())
+                    )
+                ).one()
+                sample = (
+                    host_before,
+                    loop.time(),
+                    database_now,
+                    job.heartbeat_at,
+                    job.lease_expires_at,
+                )
+            if samples:
+                previous = samples[-1]
+                database_advance = (database_now - previous[2]).total_seconds()
+                # Bound host elapsed conservatively, including query/connection
+                # latency. Only a proven forward clock step beyond the entire
+                # lease can authorize the safe-reclaim assertion below.
+                max_host_advance = sample[1] - previous[0]
+                if (
+                    database_advance - max_host_advance > 1
+                    and database_now >= job.lease_expires_at
+                ):
+                    clock_crossed_expiry = True
+            samples.append(sample)
+            await asyncio.sleep(0.05)
         contenders = await asyncio.gather(
             claim(db_engine, "reclaimer-a"), claim(db_engine, "reclaimer-b")
         )
-        assert contenders == [None, None]
+        if clock_crossed_expiry:
+            # Database-time expiry remains authoritative after a clock jump;
+            # an expired worker must not resurrect itself to satisfy this test.
+            reclaimed = [job for job in contenders if job is not None]
+            assert len(reclaimed) == 1, samples
+            assert reclaimed[0].attempt == 2
+            return
+        assert contenders == [None, None], samples
+        assert len({sample[3] for sample in samples}) >= 3, samples
         release.set()
         for _ in range(50):
             async with factory() as session:
@@ -462,6 +502,49 @@ async def test_worker_renews_lease_during_long_handler(db_engine, source_version
     finally:
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_crossed_expiry_cannot_be_renewed_and_has_one_reclaimer(
+    db_engine, source_version_id
+):
+    """Crossing database-time expiry must defeat heartbeat resurrection and grant one new attempt."""
+    await enqueue(db_engine, source_version_id)
+    original = await claim(db_engine, "original-owner")
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as session:
+        await session.execute(
+            sa.update(IngestionJob)
+            .where(IngestionJob.id == original.id)
+            .values(lease_expires_at=sa.func.clock_timestamp() - timedelta(seconds=1))
+        )
+        await session.commit()
+    async with factory() as session:
+        with pytest.raises(JobLeaseLost):
+            await heartbeat_job(
+                session, original.id, "original-owner", lease_seconds=30
+            )
+        await session.rollback()
+    contenders = await asyncio.gather(
+        claim(db_engine, "new-owner-a"), claim(db_engine, "new-owner-b")
+    )
+    reclaimed = [job for job in contenders if job is not None]
+    assert len(reclaimed) == 1
+    assert reclaimed[0].id == original.id
+    assert reclaimed[0].attempt == 2
+    async with factory() as session:
+        with pytest.raises(JobLeaseLost):
+            await heartbeat_job(
+                session, original.id, "original-owner", lease_seconds=30
+            )
+        await session.rollback()
+        history = await session.scalar(
+            sa.select(IngestionJobAttempt).where(
+                IngestionJobAttempt.job_id == original.id,
+                IngestionJobAttempt.attempt == 1,
+            )
+        )
+        assert history.outcome == "lease_expired"
+        assert history.finished_at is not None
 
 
 async def test_shutdown_leaves_processing_job_retryable(db_engine, source_version_id):
