@@ -39,7 +39,11 @@ class Settings(BaseSettings):
                 "embedding_model": self.embedding_model,
                 "expected_embedding_dimension": self.expected_embedding_dimension,
             }
-            missing = [name for name, value in required.items() if value is None or value == ""]
+            missing = [
+                name
+                for name, value in required.items()
+                if value is None or (isinstance(value, str) and not value.strip())
+            ]
             if missing:
                 raise ValueError(
                     "local AI requires explicit " + ", ".join(missing)

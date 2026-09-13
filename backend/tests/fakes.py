@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import math
+from collections.abc import Sequence
 from typing import TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from uri_backend.retrieval.providers import (
     EmbeddingBatchError,
@@ -20,13 +22,26 @@ class FakeEmbeddingProvider:
         self.responses = responses or []
         self.requests: list[int] = []
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         self.requests.append(len(texts))
         if len(self.responses) != len(texts):
             raise EmbeddingBatchError()
-        if any(len(vector) != self.expected_dimension for vector in self.responses):
+        if any(
+            len(vector) != self.expected_dimension
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (float, int))
+                or not math.isfinite(float(value))
+                for value in vector
+            )
+            for vector in self.responses
+        ):
             raise EmbeddingDimensionError()
-        return [list(vector) for vector in self.responses]
+        return [[float(value) for value in vector] for vector in self.responses]
+
+
+class FakeProviderConfigurationError(RuntimeError):
+    """Raised when a test fake was not supplied a schema-valid result."""
 
 
 class FakeStructuredProvider:
@@ -44,5 +59,12 @@ class FakeStructuredProvider:
         if self.is_unavailable:
             raise ProviderUnavailableError()
         if self.result is None:
-            return request.schema.model_construct()
-        return request.schema.model_validate(self.result.model_dump())
+            raise FakeProviderConfigurationError(
+                "FakeStructuredProvider requires an explicit result."
+            )
+        try:
+            return request.schema.model_validate(self.result.model_dump())
+        except ValidationError:
+            raise FakeProviderConfigurationError(
+                "FakeStructuredProvider result is not valid for the requested schema."
+            ) from None

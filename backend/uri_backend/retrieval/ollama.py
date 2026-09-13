@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
+from contextvars import ContextVar
 from typing import TypeVar
 
 import httpx
@@ -39,7 +41,14 @@ class OllamaProvider:
         self.timeout = timeout
         self.expected_embedding_dimension = expected_embedding_dimension
         self.transport = transport
-        self.response_metadata: dict[str, object] | None = None
+        self._response_metadata: ContextVar[dict[str, object] | None] = ContextVar(
+            "ollama_response_metadata", default=None
+        )
+
+    @property
+    def response_metadata(self) -> dict[str, object] | None:
+        metadata = self._response_metadata.get()
+        return dict(metadata) if metadata is not None else None
 
     async def generate(self, request: StructuredRequest[ModelT]) -> ModelT:
         response = await self._post(
@@ -53,9 +62,9 @@ class OllamaProvider:
             },
         )
         try:
-            content = response.json()["message"]["content"]
+            content = self._decode_response(response)["message"]["content"]
             payload = json.loads(content)
-        except (KeyError, TypeError, json.JSONDecodeError):
+        except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
             raise ProviderSchemaError("provider_invalid_json") from None
         try:
             return request.schema.model_validate(payload)
@@ -68,15 +77,20 @@ class OllamaProvider:
             {"model": self.embedding_model, "input": list(texts)},
         )
         try:
-            embeddings = response.json()["embeddings"]
-        except (KeyError, TypeError, json.JSONDecodeError):
+            embeddings = self._decode_response(response)["embeddings"]
+        except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
             raise ProviderSchemaError("provider_invalid_json") from None
         if not isinstance(embeddings, list) or len(embeddings) != len(texts):
             raise EmbeddingBatchError()
         if any(
             not isinstance(vector, list)
             or len(vector) != self.expected_embedding_dimension
-            or any(not isinstance(value, (float, int)) for value in vector)
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (float, int))
+                or not math.isfinite(float(value))
+                for value in vector
+            )
             for vector in embeddings
         ):
             raise EmbeddingDimensionError()
@@ -97,9 +111,32 @@ class OllamaProvider:
             raise ProviderResponseError() from None
         except httpx.TransportError:
             raise ProviderConnectionError() from None
-        self.response_metadata = {
+        self._response_metadata.set({
             "status_code": response.status_code,
             "model": payload["model"],
-            "done": response.headers.get("x-ollama-done") == "true",
-        }
+        })
         return response
+
+    def _decode_response(self, response: httpx.Response) -> dict[str, object]:
+        try:
+            body = response.json()
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ProviderSchemaError("provider_invalid_json") from None
+        if not isinstance(body, dict):
+            raise ProviderSchemaError("provider_invalid_json")
+        metadata = self.response_metadata or {}
+        for key in (
+            "total_duration",
+            "load_duration",
+            "prompt_eval_count",
+            "eval_count",
+        ):
+            value = body.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                metadata[key] = value
+        if isinstance(body.get("done"), bool):
+            metadata["done"] = body["done"]
+        if isinstance(body.get("created_at"), str):
+            metadata["created_at"] = body["created_at"]
+        self._response_metadata.set(metadata)
+        return body

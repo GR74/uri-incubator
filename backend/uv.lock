@@ -1178,6 +1178,7 @@ dependencies = [
     { name = "anyio" },
     { name = "fastapi" },
     { name = "greenlet" },
+    { name = "httpx" },
     { name = "nbformat" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
@@ -1191,7 +1192,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -1203,6 +1203,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=3.6.2,<4.10" },
     { name = "fastapi", specifier = ">=0.115,<0.116" },
     { name = "greenlet", specifier = ">=3,<4" },
+    { name = "httpx", specifier = ">=0.27,<1.0" },
     { name = "nbformat", specifier = ">=5.10,<6" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4.0" },
     { name = "pydantic-settings", specifier = ">=2.0,<3.0" },
@@ -1216,7 +1217,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.27,<1.0" },
     { name = "pytest", specifier = ">=8,<9" },
     { name = "pytest-asyncio", specifier = ">=0.24,<1.0" },
     { name = "ruff", specifier = ">=0.6,<1.0" },
