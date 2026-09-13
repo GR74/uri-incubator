@@ -75,6 +75,11 @@ async def enqueue_ingestion(
     return run
 
 
+async def enqueue_extraction(session: AsyncSession, source_version_id: UUID) -> IngestionRun:
+    """Schedule exactly one post-normalization cited-extraction run per version."""
+    return await enqueue_ingestion(session, source_version_id, "extraction-v1")
+
+
 async def claim_next_job(
     session: AsyncSession,
     worker_id: str,

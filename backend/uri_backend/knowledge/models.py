@@ -9,6 +9,7 @@ from sqlalchemy import event
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from uri_backend.ingestion.models import ExtractionRun
 from uri_backend.knowledge.errors import ImmutableRecordError
 from uri_backend.projects.models import Base
 
@@ -92,11 +93,20 @@ class DraftSet(Base):
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(sa.ForeignKey("projects.id"), nullable=False)
     author_id: Mapped[UUID] = mapped_column(sa.ForeignKey("users.id"), nullable=False)
+    extraction_run_id: Mapped[UUID | None] = mapped_column(sa.ForeignKey("extraction_runs.id"))
     status: Mapped[DraftStatus] = mapped_column(_enum_column(DraftStatus), nullable=False, default=DraftStatus.DRAFT, server_default="draft")
     version: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), onupdate=sa.func.now())
     candidates: Mapped[list[DraftCandidate]] = relationship(back_populates="draft_set")
+    extraction_run: Mapped[ExtractionRun | None] = relationship()
+
+    @property
+    def validation_warnings(self) -> list[object]:
+        """Warnings are persisted on the provenance run, never in model response text."""
+        from types import SimpleNamespace
+
+        return [SimpleNamespace(**warning) for warning in (self.extraction_run.warnings if self.extraction_run else [])]
 
 
 class GraphEntity(Base):
@@ -121,6 +131,7 @@ class DraftCandidate(Base):
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)
     draft_set_id: Mapped[UUID] = mapped_column(sa.ForeignKey("draft_sets.id", ondelete="CASCADE"), nullable=False)
+    extraction_run_id: Mapped[UUID | None] = mapped_column(sa.ForeignKey("extraction_runs.id"))
     candidate_type: Mapped[CandidateType] = mapped_column(_enum_column(CandidateType), nullable=False)
     statement: Mapped[str] = mapped_column(sa.Text, nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict, server_default=sa.text("'{}'::jsonb"))
@@ -149,12 +160,21 @@ class CandidateCitation(Base):
 
 class DraftRelation(Base):
     __tablename__ = "draft_relations"
-    __table_args__ = (sa.CheckConstraint("relation_type IN ('proposes', 'accepts', 'rejects', 'explains', 'implements', 'tests', 'uses', 'produces', 'supports', 'challenges', 'summarizes', 'cites', 'defines', 'deviates_from', 'assigned_to', 'reviewed_by', 'supersedes', 'belongs_to', 'continued_from')", name="ck_draft_relation_type"), sa.CheckConstraint("source_candidate_id <> target_candidate_id", name="ck_draft_relation_distinct_endpoints"), sa.CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_draft_relation_confidence"))
+    __table_args__ = (
+        sa.CheckConstraint("relation_type IN ('proposes', 'accepts', 'rejects', 'explains', 'implements', 'tests', 'uses', 'produces', 'supports', 'challenges', 'summarizes', 'cites', 'defines', 'deviates_from', 'assigned_to', 'reviewed_by', 'supersedes', 'belongs_to', 'continued_from')", name="ck_draft_relation_type"),
+        sa.CheckConstraint("source_candidate_id <> target_candidate_id", name="ck_draft_relation_distinct_endpoints"),
+        sa.CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_draft_relation_confidence"),
+        sa.CheckConstraint("(source_candidate_id IS NULL) <> (source_record_id IS NULL)", name="ck_draft_relation_source_endpoint"),
+        sa.CheckConstraint("(target_candidate_id IS NULL) <> (target_record_id IS NULL)", name="ck_draft_relation_target_endpoint"),
+    )
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)
     draft_set_id: Mapped[UUID] = mapped_column(sa.ForeignKey("draft_sets.id", ondelete="CASCADE"), nullable=False)
-    source_candidate_id: Mapped[UUID] = mapped_column(sa.ForeignKey("draft_candidates.id"), nullable=False)
-    target_candidate_id: Mapped[UUID] = mapped_column(sa.ForeignKey("draft_candidates.id"), nullable=False)
+    extraction_run_id: Mapped[UUID | None] = mapped_column(sa.ForeignKey("extraction_runs.id"))
+    source_candidate_id: Mapped[UUID | None] = mapped_column(sa.ForeignKey("draft_candidates.id"))
+    source_record_id: Mapped[UUID | None] = mapped_column(sa.ForeignKey("records.id"))
+    target_candidate_id: Mapped[UUID | None] = mapped_column(sa.ForeignKey("draft_candidates.id"))
+    target_record_id: Mapped[UUID | None] = mapped_column(sa.ForeignKey("records.id"))
     relation_type: Mapped[RelationType] = mapped_column(_enum_column(RelationType), nullable=False)
     statement: Mapped[str | None] = mapped_column(sa.Text)
     confidence: Mapped[float | None] = mapped_column(sa.Float)

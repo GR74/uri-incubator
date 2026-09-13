@@ -35,10 +35,16 @@ from uri_backend.ingestion.queue import (
     JobLeaseLost,
     claim_next_job,
     complete_job,
+    enqueue_extraction,
     fail_job,
     heartbeat_job,
     owned_claim,
     release_job,
+)
+from uri_backend.knowledge.extraction import ExtractionConfig, extract_candidates
+from uri_backend.retrieval.providers import (
+    StructuredGenerationProvider,
+    build_model_provider,
 )
 from uri_backend.sources.models import (
     Artifact,
@@ -113,6 +119,49 @@ def build_normalization_handler(
         await persist_normalization(
             sessions, job, artifact_root or Settings().artifact_root, adapters
         )
+
+    return handler
+
+
+def _configured_extraction_config(settings: Settings) -> ExtractionConfig:
+    return ExtractionConfig(
+        model_id=settings.generation_model or "unconfigured",
+        model_digest="unavailable" if not settings.local_ai_enabled else "unverified",
+        prompt_version="extraction-prompt-v1",
+        schema_version="candidate-batch-v1",
+        parser_version="normalization-v1",
+        sampling_config={"temperature": 0},
+        sampling_version="sampling-v1",
+    )
+
+
+def build_extraction_handler(
+    sessions: async_sessionmaker[AsyncSession] | None,
+    provider: StructuredGenerationProvider | None = None,
+    extraction_config: ExtractionConfig | None = None,
+) -> JobHandler:
+    """Build a fenced extraction handler; completion remains the worker's job."""
+    settings = Settings()
+    active_provider = provider or build_model_provider(settings)
+    active_config = extraction_config or _configured_extraction_config(settings)
+
+    async def handler(job: ClaimedJob) -> None:
+        if sessions is None:
+            raise WorkerConfigurationError("Extraction handler requires database sessions")
+        async with sessions() as session:
+            source_version_id = await session.scalar(
+                sa.select(IngestionRun.source_version_id).where(IngestionRun.id == job.run_id)
+            )
+            if source_version_id is None:
+                raise LookupError(f"Unknown ingestion run {job.run_id}")
+            await session.commit()
+            await extract_candidates(
+                session,
+                source_version_id,
+                active_provider,
+                active_config,
+                ingestion_run_id=job.run_id,
+            )
 
     return handler
 
@@ -244,6 +293,9 @@ async def persist_normalization(
             )
         assert assessment_id is not None
         await session.flush()
+        # This job becomes durable with the normalized parts. A crash cannot
+        # create extraction work for a version whose normalization rolled back.
+        await enqueue_extraction(session, version_id)
         # Check wall-clock lease validity again after potentially slow writes.
         await owned_claim(session, job)
 
@@ -286,6 +338,7 @@ def build_default_dispatcher(
     dispatcher.register(
         "normalization-v1", build_normalization_handler(sessions, artifact_root)
     )
+    dispatcher.register("extraction-v1", build_extraction_handler(sessions))
     return dispatcher
 
 
