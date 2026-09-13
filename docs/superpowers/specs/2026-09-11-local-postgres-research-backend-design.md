@@ -132,7 +132,7 @@ Contribution summaries are derived from reviewed domain actions. Source-native a
 
 ### 1. Git
 
-The pilot registers a trusted local repository or Git bundle, one named branch or ref, an explicit commit range, and optional path allowlists. It records repository identity, remote URL when available, ref name, start and end commit IDs, commits, authorship metadata, allowed file snapshots, and relevant diffs.
+The first ingestion increment registers a trusted local repository, one named ref, an explicit commit range, and path allowlists. It records resolved ref/head, requested and resolved start/end IDs, commits, authorship metadata, and allowed file snapshots. Inclusive ranges use `Reach(end) - Reach(parents(start))`, deliberately retaining the start and reachable merged changes in deterministic topological order. Patch-level diffs, Git bundles, and additional repository metadata are later fidelity enhancements.
 
 The importer reads the repository without changing its checkout. Secret-like files, large binaries, ignored research data, and paths outside the approved repository are excluded. Git can establish what changed and which code produced an analysis; it cannot independently establish why a scientific choice was made or who deserves intellectual credit.
 
@@ -144,7 +144,7 @@ Each message retains role, author label where known, timestamp where available, 
 
 ### 3. Research documents
 
-The document adapter accepts Markdown, plain text, DOCX, and text-bearing PDF. It preserves headings, paragraphs, tables, comments or revisions when the format exposes them, page or paragraph locations, and document metadata. Scanned PDFs are reported as requiring OCR rather than producing fabricated empty extraction.
+The document adapter accepts Markdown, plain text, DOCX, and text-bearing PDF. The first ingestion increment preserves rendered text, paragraphs, tables, and page/paragraph locations. DOCX comments and tracked revisions are explicitly deferred fidelity enhancements. Scanned PDFs are reported as requiring OCR rather than producing fabricated empty extraction.
 
 Typical pilot documents include methods, manuscript sections, decision notes, meeting notes, and reviewed redlines.
 

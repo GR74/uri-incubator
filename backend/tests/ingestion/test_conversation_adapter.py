@@ -54,7 +54,10 @@ def synthetic_export() -> bytes:
                         "parent": "prompt",
                         "message": {
                             "id": "msg-answer",
-                            "author": {"role": "assistant", "name": "Synthetic Assistant"},
+                            "author": {
+                                "role": "assistant",
+                                "name": "Synthetic Assistant",
+                            },
                             "create_time": 1700000002,
                             "content": {"parts": ["Selected synthetic answer"]},
                         },
@@ -110,12 +113,16 @@ async def conversation_service(db_engine: AsyncEngine, tmp_path: Path):
     async with factory() as session:
         session.add_all(
             [
-                User(id=actor_id, display_name="Conversation tester", is_pilot_actor=True),
+                User(
+                    id=actor_id, display_name="Conversation tester", is_pilot_actor=True
+                ),
                 Project(id=project_id, name="Conversation project"),
             ]
         )
         await session.flush()
-        session.add(ProjectMembership(user_id=actor_id, project_id=project_id, role="owner"))
+        session.add(
+            ProjectMembership(user_id=actor_id, project_id=project_id, role="owner")
+        )
         await session.commit()
     return ConversationService(
         factory,
@@ -127,7 +134,9 @@ async def conversation_service(db_engine: AsyncEngine, tmp_path: Path):
 
 
 @pytest_asyncio.fixture
-async def conversation_client(db_engine: AsyncEngine, tmp_path: Path) -> httpx.AsyncClient:
+async def conversation_client(
+    db_engine: AsyncEngine, tmp_path: Path
+) -> httpx.AsyncClient:
     app = create_app(
         Settings(
             database_url="postgresql+psycopg://unused",
@@ -146,7 +155,9 @@ async def test_only_selected_conversations_are_promoted(conversation_service) ->
     """Persisting all export messages would breach explicit per-conversation consent."""
     inventory = conversation_service.inventory(io.BytesIO(synthetic_export()))
 
-    promoted = await conversation_service.promote(inventory.stage_id, ["conv-clearermind"])
+    promoted = await conversation_service.promote(
+        inventory.stage_id, ["conv-clearermind"]
+    )
 
     assert [item.external_id for item in promoted] == ["conv-clearermind"]
     assert not inventory.staging_path.exists()
@@ -158,8 +169,12 @@ async def test_only_selected_conversations_are_promoted(conversation_service) ->
         durable_text = " ".join(
             [
                 *(await session.scalars(sa.select(Source.title))).all(),
-                *(await session.scalars(sa.select(SourceVersion.metadata_))).all().__str__(),
-                *(await session.scalars(sa.select(AuditEvent.metadata_))).all().__str__(),
+                *(await session.scalars(sa.select(SourceVersion.metadata_)))
+                .all()
+                .__str__(),
+                *(await session.scalars(sa.select(AuditEvent.metadata_)))
+                .all()
+                .__str__(),
             ]
         )
     artifact_text = "\n".join(
@@ -173,7 +188,9 @@ async def test_only_selected_conversations_are_promoted(conversation_service) ->
 
 async def test_expired_stage_cannot_be_promoted(conversation_service) -> None:
     """Ignoring TTL would retain raw conversation material after its allowed lifetime."""
-    inventory = conversation_service.inventory(io.BytesIO(synthetic_export()), ttl=timedelta(seconds=-1))
+    inventory = conversation_service.inventory(
+        io.BytesIO(synthetic_export()), ttl=timedelta(seconds=-1)
+    )
 
     with pytest.raises(StageExpired):
         await conversation_service.promote(inventory.stage_id, ["conv-clearermind"])
@@ -181,20 +198,30 @@ async def test_expired_stage_cannot_be_promoted(conversation_service) -> None:
     assert not inventory.staging_path.exists()
 
 
-def test_malformed_export_is_purged_without_echoing_message_text(conversation_service) -> None:
+def test_malformed_export_is_purged_without_echoing_message_text(
+    conversation_service,
+) -> None:
     """A parser error must not leave or disclose a rejected export body."""
     with pytest.raises(ExportMalformed) as error:
-        conversation_service.inventory(io.BytesIO(b'{"secret":"UNSELECTED_SECRET_MARKER"'))
+        conversation_service.inventory(
+            io.BytesIO(b'{"secret":"UNSELECTED_SECRET_MARKER"')
+        )
 
     assert "UNSELECTED_SECRET_MARKER" not in str(error.value)
-    assert list(conversation_service.staging_root.glob("*")) == []
+    assert not any(
+        path.is_file() for path in conversation_service.staging_root.rglob("*")
+    )
 
 
-def test_inventory_contains_metadata_but_never_message_bodies(conversation_service) -> None:
+def test_inventory_contains_metadata_but_never_message_bodies(
+    conversation_service,
+) -> None:
     """Previewing a stage must not expose content before the user selects it."""
     inventory = conversation_service.inventory(io.BytesIO(synthetic_export()))
 
-    assert [(item.external_id, item.message_count) for item in inventory.conversations] == [
+    assert [
+        (item.external_id, item.message_count) for item in inventory.conversations
+    ] == [
         ("conv-clearermind", 2),
         ("conv-unrelated", 1),
     ]
@@ -204,7 +231,7 @@ def test_inventory_contains_metadata_but_never_message_bodies(conversation_servi
 
 
 async def test_zero_selection_purges_the_export_without_creating_sources(
-    conversation_service
+    conversation_service,
 ) -> None:
     """Treating an empty selection as a default import would defeat consent."""
     inventory = conversation_service.inventory(io.BytesIO(synthetic_export()))
@@ -224,7 +251,9 @@ def test_oversized_export_is_rejected_and_purged(conversation_service) -> None:
     with pytest.raises(ExportMalformed, match="byte limit"):
         conversation_service.inventory(oversized)
 
-    assert list(conversation_service.staging_root.glob("*")) == []
+    assert not any(
+        path.is_file() for path in conversation_service.staging_root.rglob("*")
+    )
 
 
 def test_purge_failure_is_visible_without_returning_export_content(
@@ -236,7 +265,9 @@ def test_purge_failure_is_visible_without_returning_export_content(
     def fail_purge(_: Path) -> None:
         raise OSError("synthetic removal failure")
 
-    monkeypatch.setattr("uri_backend.ingestion.adapters.conversations.shutil.rmtree", fail_purge)
+    monkeypatch.setattr(
+        "uri_backend.ingestion.adapters.conversations.shutil.rmtree", fail_purge
+    )
     with pytest.raises(StagePurgeFailed) as error:
         conversation_service.cancel(inventory.stage_id)
 
@@ -266,7 +297,7 @@ async def test_preview_then_selected_promotion_never_returns_unselected_bodies(
 
 
 def test_janitor_purges_expired_stage_without_a_follow_up_request(
-    conversation_service
+    conversation_service,
 ) -> None:
     """An abandoned export must not wait for another client request before deletion."""
     inventory = conversation_service.inventory(
@@ -281,7 +312,7 @@ def test_janitor_purges_expired_stage_without_a_follow_up_request(
 
 
 async def test_restart_discovers_stage_and_public_promotion_interface(
-    conversation_service
+    conversation_service,
 ) -> None:
     """Losing process memory must not strand a selected stage or its TTL metadata."""
     inventory = conversation_service.inventory(io.BytesIO(synthetic_export()))
@@ -326,7 +357,9 @@ async def test_app_janitor_stops_cleanly_after_lifespan(tmp_path: Path) -> None:
         uuid4(),
         uuid4(),
     )
-    inventory = service.inventory(io.BytesIO(synthetic_export()), ttl=timedelta(seconds=-1))
+    inventory = service.inventory(
+        io.BytesIO(synthetic_export()), ttl=timedelta(seconds=-1)
+    )
     async with app.router.lifespan_context(app):
         task = app.state.conversation_stage_janitor_task
         for _ in range(20):
@@ -362,3 +395,78 @@ def test_janitor_reports_root_traversal_failure_and_retries(
 
     assert failed.failures == ["staging_root"]
     assert recovered.failures == []
+
+
+async def test_janitor_between_upload_chunks_preserves_live_intake(
+    conversation_service,
+):
+    """A stage directory visible before stage.json must not be purged during upload."""
+    body = synthetic_export()
+
+    async def chunks():
+        yield body[:30]
+        result = purge_expired_conversation_stages(conversation_service.staging_root)
+        assert result.purged_stage_ids == []
+        assert result.failures == []
+        yield body[30:]
+
+    inventory = await conversation_service.inventory_async(chunks())
+    assert len(inventory.conversations) == 2
+    conversation_service.cancel(inventory.stage_id)
+
+
+async def test_upload_shutdown_purges_partial_intake(conversation_service):
+    """Cancelled uploads must remove staged bodies rather than waiting indefinitely."""
+    started = asyncio.Event()
+
+    async def chunks():
+        yield synthetic_export()[:30]
+        started.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(conversation_service.inventory_async(chunks()))
+    await asyncio.wait_for(started.wait(), 3)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not any(
+        path.is_file() for path in conversation_service.staging_root.rglob("*")
+    )
+
+
+def test_restart_expires_abandoned_upload_lease(conversation_service):
+    """Abandoned uploading manifests must expire across restarts without exposing bodies."""
+    from datetime import UTC, datetime
+
+    path = conversation_service.staging_root / "abandoned-upload"
+    path.mkdir(parents=True)
+    (path / "export.json").write_bytes(b"UNSELECTED_SECRET_MARKER")
+    (path / "upload.json").write_text(
+        json.dumps(
+            {
+                "state": "uploading",
+                "expires_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+            }
+        )
+    )
+    result = purge_expired_conversation_stages(conversation_service.staging_root)
+    assert result.purged_stage_ids == ["abandoned-upload"]
+    assert result.failures == []
+    assert not path.exists()
+
+
+def test_janitor_during_intake_directory_creation_does_not_remove_upload_root(
+    conversation_service, monkeypatch
+):
+    """Removing the shared empty intake root races an uploader about to create its child."""
+    original = Path.mkdir
+
+    def interleave(path, *args, **kwargs):
+        original(path, *args, **kwargs)
+        if path == conversation_service.staging_root / ".intake":
+            purge_expired_conversation_stages(conversation_service.staging_root)
+
+    monkeypatch.setattr(Path, "mkdir", interleave)
+    inventory = conversation_service.inventory(io.BytesIO(synthetic_export()))
+    assert inventory.staging_path.exists()
+    conversation_service.cancel(inventory.stage_id)

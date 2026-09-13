@@ -19,6 +19,19 @@ file, then validated by a fail-closed family/media adapter and privacy preflight
 before content-addressed artifact publication. Conversation exports and Git use
 their scoped intake routes rather than generic upload.
 
+Workers renew live leases while parsers run outside the event loop. Publication
+and outcome transitions require the current job, attempt, owner, and unexpired
+lease; shutdown returns unfinished processing to the queue. Conversation uploads
+use renewable intake manifests and atomic stage promotion with restart-aware
+expiry. Quality status preserves safe adapter/version/status/coverage metadata
+and structured parser warnings, and uses normalized provenance for reproducibility.
+
+Git currently captures commit metadata and selected file snapshots, with explicit
+inclusive reachability ranges. Git patch-level diffs and DOCX comments/tracked
+revisions are deferred fidelity enhancements, not current capabilities. OCR,
+model extraction, GraphRAG, reviewed publication, and backend-connected frontend
+screens belong to later increments. The existing frontend remains unchanged.
+
 ## Current increment
 
 Implement the first connected workspace from `UX_BLUEPRINT.md`: Project Home, evidence intake, review, published record, and handoff/export. GPT-5.6 Sol workers own workspace components, evidence workflow, and CSS; the primary agent owns integration and verification.

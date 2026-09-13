@@ -114,3 +114,117 @@ def test_git_import_rejects_windows_drive_qualified_include_path(
         GitAdapter().inventory(
             git_fixture_repo.command(include_paths=["C:/sensitive/**"])
         )
+
+
+def test_broad_git_inventory_excludes_secret_material(git_fixture_repo):
+    """Broad include patterns must never capture env variants, private keys, or credentials."""
+    root = git_fixture_repo.root
+    names = [
+        ".env.local",
+        ".env.production",
+        "id_rsa",
+        "id_ed25519",
+        "server.pem",
+        "client.p12",
+        "service.pfx",
+        "signing.key",
+        "server.crt",
+        "credentials.json",
+        "api-token.txt",
+    ]
+    for name in names:
+        (root / name).write_text("EXCLUDED_SECRET_MARKER", encoding="utf-8")
+    (root / "tokenization_research.md").write_text(
+        "Ordinary research", encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "-C", str(root), "add", "."], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(root), "commit", "-m", "Add synthetic exclusion fixtures"],
+        check=True,
+        capture_output=True,
+    )
+    head = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    adapter = GitAdapter()
+    inventory = adapter.inventory(
+        git_fixture_repo.command(end_commit=head, include_paths=["**"])
+    )
+    assert "EXCLUDED_SECRET_MARKER" not in adapter.manifest_bytes(inventory).decode()
+    assert "tokenization_research.md" in {item.path for item in inventory.files}
+    assert set(names) <= {item["path"] for item in inventory.exclusions}
+
+
+def test_inclusive_range_uses_reachability_across_skewed_merge_history(
+    git_fixture_repo,
+):
+    """Date-position slicing drops merged ancestors that precede the selected start in output."""
+    import os
+
+    root = git_fixture_repo.root
+
+    def git(*args, date="2024-01-01T00:00:00+00:00"):
+        return subprocess.check_output(
+            ["git", "-C", str(root), *args],
+            text=True,
+            env={**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date},
+        ).strip()
+
+    git("checkout", "-b", "merged", git_fixture_repo.first_sha)
+    merged = git(
+        "commit-tree",
+        f"{git_fixture_repo.first_sha}^{{tree}}",
+        "-p",
+        git_fixture_repo.first_sha,
+        "-m",
+        "Reachable side change",
+        date="2000-01-01T00:00:00+00:00",
+    )
+    git("update-ref", "refs/heads/merged", merged)
+    unrelated = git(
+        "commit-tree",
+        f"{git_fixture_repo.first_sha}^{{tree}}",
+        "-m",
+        "Unrelated history",
+    )
+    git("update-ref", "refs/heads/unrelated", unrelated)
+    git("checkout", "pilot")
+    end = git(
+        "commit-tree",
+        f"{git_fixture_repo.last_sha}^{{tree}}",
+        "-p",
+        git_fixture_repo.last_sha,
+        "-p",
+        merged,
+        "-m",
+        "Merge history",
+        date="1990-01-01T00:00:00+00:00",
+    )
+    git("update-ref", "refs/heads/pilot", end)
+    adapter = GitAdapter()
+    inventory = adapter.inventory(
+        git_fixture_repo.command(start_commit=git_fixture_repo.last_sha, end_commit=end)
+    )
+    shas = [commit.sha for commit in inventory.commits]
+    assert set(shas) == {git_fixture_repo.last_sha, merged, end}
+    assert shas.index(end) > shas.index(merged)
+    assert shas.index(end) > shas.index(git_fixture_repo.last_sha)
+    manifest = inventory.manifest()
+    assert manifest["range"] == {
+        "ref_name": "refs/heads/pilot",
+        "resolved_ref_sha": end,
+        "requested_start": git_fixture_repo.last_sha,
+        "requested_end": end,
+        "resolved_start_sha": git_fixture_repo.last_sha,
+        "resolved_end_sha": end,
+        "policy": "inclusive_start_exclude_start_ancestors",
+    }
+    assert adapter.manifest_bytes(inventory) == adapter.manifest_bytes(
+        adapter.inventory(
+            git_fixture_repo.command(
+                start_commit=git_fixture_repo.last_sha, end_commit=end
+            )
+        )
+    )

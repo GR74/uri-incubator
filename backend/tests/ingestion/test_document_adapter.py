@@ -111,7 +111,9 @@ def test_malformed_document_reports_visible_parse_failure(tmp_path: Path) -> Non
     malformed.write_bytes(b"\xff")
 
     result = DocumentAdapter().normalize(
-        AdapterInput(artifact_path=malformed, media_type="text/markdown", family="document")
+        AdapterInput(
+            artifact_path=malformed, media_type="text/markdown", family="document"
+        )
     )
 
     assert result.status == "failed"
@@ -140,21 +142,33 @@ async def document_run(clean_document_tables, db_engine: AsyncEngine, tmp_path: 
     artifact_path = artifact_root / storage_key
     artifact_path.parent.mkdir(parents=True)
     artifact_path.write_bytes(content)
-    project_id, user_id, source_id, artifact_id, version_id = (uuid4() for _ in range(5))
+    project_id, user_id, source_id, artifact_id, version_id = (
+        uuid4() for _ in range(5)
+    )
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
     async with factory() as session:
         session.add_all(
             [
                 User(id=user_id, display_name="Document tester", is_pilot_actor=True),
                 Project(id=project_id, name="Document project"),
-                Artifact(id=artifact_id, sha256=digest, storage_key=storage_key, byte_size=len(content)),
+                Artifact(
+                    id=artifact_id,
+                    sha256=digest,
+                    storage_key=storage_key,
+                    byte_size=len(content),
+                ),
             ]
         )
         await session.flush()
         session.add_all(
             [
                 ProjectMembership(user_id=user_id, project_id=project_id, role="owner"),
-                Source(id=source_id, project_id=project_id, family="document", external_id="sample.md"),
+                Source(
+                    id=source_id,
+                    project_id=project_id,
+                    family="document",
+                    external_id="sample.md",
+                ),
                 SourceVersion(
                     id=version_id,
                     source_id=source_id,
@@ -184,7 +198,9 @@ async def test_normalization_worker_persists_ordered_parts_atomically(
     factory, artifact_root, run = document_run
     dispatcher = build_default_dispatcher(factory, artifact_root)
     worker = asyncio.create_task(
-        run_worker(factory, dispatcher=dispatcher, worker_id="document-worker", poll_seconds=10)
+        run_worker(
+            factory, dispatcher=dispatcher, worker_id="document-worker", poll_seconds=10
+        )
     )
     try:
         for _ in range(40):
@@ -196,7 +212,9 @@ async def test_normalization_worker_persists_ordered_parts_atomically(
                     parts = (
                         await session.scalars(
                             sa.select(ContentPart)
-                            .where(ContentPart.source_version_id == run.source_version_id)
+                            .where(
+                                ContentPart.source_version_id == run.source_version_id
+                            )
                             .order_by(ContentPart.ordinal)
                         )
                     ).all()
@@ -222,8 +240,146 @@ def test_default_dispatcher_registers_normalization_handler() -> None:
     assert dispatcher.can_dispatch("normalization-v1") is True
 
 
-def _claimed_normalization_job(run) -> ClaimedJob:
-    return ClaimedJob(id=uuid4(), run_id=run.id, attempt=1, pipeline_version="normalization-v1")
+async def _claimed_normalization_job(factory) -> ClaimedJob:
+    async with factory() as session:
+        job = await claim_next_job(session, "document-test", 30)
+        await session.commit()
+        return job
+
+
+async def test_stale_attempt_cannot_publish_parts_or_quality(document_run):
+    """A reclaimed attempt with the same worker identity must publish no immutable output."""
+    from uri_backend.ingestion.queue import JobLeaseLost
+
+    factory, root, _run = document_run
+    async with factory() as session:
+        first = await claim_next_job(session, "same-worker", 30)
+        await session.commit()
+    async with factory() as session:
+        await session.execute(
+            sa.update(IngestionJob)
+            .where(IngestionJob.id == first.id)
+            .values(lease_expires_at=sa.func.now() - sa.text("interval '1 second'"))
+        )
+        await session.commit()
+    async with factory() as session:
+        retry = await claim_next_job(session, "same-worker", 30)
+        await session.commit()
+    assert retry.attempt == 2
+    with pytest.raises(JobLeaseLost):
+        await persist_normalization(factory, first, root, default_adapter_registry())
+    async with factory() as session:
+        assert (
+            await session.scalar(sa.select(sa.func.count()).select_from(ContentPart))
+            == 0
+        )
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(SourceQualityAssessment)
+            )
+            == 0
+        )
+
+
+async def test_sync_parser_does_not_block_heartbeat(document_run):
+    """Parsing on the event loop blocks lease renewal and exposes live work to reclaim."""
+    import threading
+    import time
+
+    from uri_backend.ingestion.worker import (
+        PipelineDispatcher,
+        build_normalization_handler,
+    )
+
+    factory, root, _run = document_run
+    started = threading.Event()
+
+    class SlowDocument(DocumentAdapter):
+        def normalize(self, context):
+            started.set()
+            time.sleep(1.6)
+            return super().normalize(context)
+
+    dispatcher = PipelineDispatcher()
+    dispatcher.register(
+        "normalization-v1",
+        build_normalization_handler(factory, root, AdapterRegistry([SlowDocument()])),
+    )
+    worker = asyncio.create_task(
+        run_worker(
+            factory,
+            dispatcher,
+            worker_id="slow-parser",
+            lease_seconds=1,
+            poll_seconds=0.02,
+        )
+    )
+    try:
+        for _ in range(100):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(1.1)
+        async with factory() as session:
+            job = await session.scalar(sa.select(IngestionJob))
+            assert job.status == "running"
+            assert job.heartbeat_at > job.created_at
+            assert await claim_next_job(session, "contender", 1) is None
+        for _ in range(100):
+            async with factory() as session:
+                if await session.scalar(sa.select(IngestionJob.status)) == "succeeded":
+                    break
+            await asyncio.sleep(0.02)
+        else:
+            pytest.fail("slow parser did not publish")
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_lease_expiring_during_publication_rolls_back_all_outputs(document_run):
+    """A lease valid at transaction entry must also fence output after a slow database write."""
+    from uri_backend.ingestion.queue import JobLeaseLost
+
+    factory, root, _run = document_run
+    async with factory() as session:
+        await session.execute(
+            sa.text(
+                "CREATE FUNCTION test_slow_publication() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(1.2); RETURN NULL; END $$"
+            )
+        )
+        await session.execute(
+            sa.text(
+                "CREATE TRIGGER test_slow_publication BEFORE INSERT ON content_parts FOR EACH STATEMENT EXECUTE FUNCTION test_slow_publication()"
+            )
+        )
+        claimed = await claim_next_job(session, "slow-database", 1)
+        await session.commit()
+    try:
+        with pytest.raises(JobLeaseLost):
+            await persist_normalization(
+                factory, claimed, root, default_adapter_registry()
+            )
+        async with factory() as session:
+            assert (
+                await session.scalar(
+                    sa.select(sa.func.count()).select_from(ContentPart)
+                )
+                == 0
+            )
+            assert (
+                await session.scalar(
+                    sa.select(sa.func.count()).select_from(SourceQualityAssessment)
+                )
+                == 0
+            )
+    finally:
+        async with factory() as session:
+            await session.execute(
+                sa.text("DROP TRIGGER test_slow_publication ON content_parts")
+            )
+            await session.execute(sa.text("DROP FUNCTION test_slow_publication()"))
+            await session.commit()
 
 
 async def _add_part(factory, run, *, text: str, ordinal: int = 1) -> None:
@@ -245,7 +401,9 @@ async def _add_part(factory, run, *, text: str, ordinal: int = 1) -> None:
     not os.environ.get("URI_TEST_DATABASE_URL"),
     reason="requires explicitly configured isolated PostgreSQL",
 )
-async def test_retry_replaces_only_unpublished_parts_for_its_same_run(document_run) -> None:
+async def test_retry_replaces_only_unpublished_parts_for_its_same_run(
+    document_run,
+) -> None:
     """A retry must replace its own stale partial output rather than duplicate it."""
     factory, artifact_root, run = document_run
     async with factory() as session:
@@ -256,7 +414,10 @@ async def test_retry_replaces_only_unpublished_parts_for_its_same_run(document_r
     await _add_part(factory, run, text="stale partial output")
 
     await persist_normalization(
-        factory, _claimed_normalization_job(run), artifact_root, default_adapter_registry()
+        factory,
+        await _claimed_normalization_job(factory),
+        artifact_root,
+        default_adapter_registry(),
     )
 
     async with factory() as session:
@@ -325,7 +486,9 @@ async def test_crash_after_normalization_reuses_one_immutable_quality_assessment
     not os.environ.get("URI_TEST_DATABASE_URL"),
     reason="requires explicitly configured isolated PostgreSQL",
 )
-async def test_successful_run_parts_reject_deletion_even_with_matching_session_token(document_run) -> None:
+async def test_successful_run_parts_reject_deletion_even_with_matching_session_token(
+    document_run,
+) -> None:
     """A mutable session token alone must never permit deletion of published parts."""
     factory, _, run = document_run
     await _add_part(factory, run, text="published output")
@@ -342,21 +505,26 @@ async def test_successful_run_parts_reject_deletion_even_with_matching_session_t
         )
         with pytest.raises(sa.exc.DBAPIError):
             await session.execute(
-                sa.delete(ContentPart).where(ContentPart.source_version_id == run.source_version_id)
+                sa.delete(ContentPart).where(
+                    ContentPart.source_version_id == run.source_version_id
+                )
             )
         await session.rollback()
 
     async with factory() as session:
-        assert await session.scalar(
-            sa.select(sa.func.count()).select_from(ContentPart)
-        ) == 1
+        assert (
+            await session.scalar(sa.select(sa.func.count()).select_from(ContentPart))
+            == 1
+        )
 
 
 @pytest.mark.skipif(
     not os.environ.get("URI_TEST_DATABASE_URL"),
     reason="requires explicitly configured isolated PostgreSQL",
 )
-async def test_different_run_parts_reject_deletion_from_current_run(document_run) -> None:
+async def test_different_run_parts_reject_deletion_from_current_run(
+    document_run,
+) -> None:
     """A current retry must not use its token to mutate an earlier run's output."""
     factory, _, run = document_run
     earlier_run = IngestionRun(
@@ -377,7 +545,9 @@ async def test_different_run_parts_reject_deletion_from_current_run(document_run
         )
         with pytest.raises(sa.exc.DBAPIError):
             await session.execute(
-                sa.delete(ContentPart).where(ContentPart.source_version_id == run.source_version_id)
+                sa.delete(ContentPart).where(
+                    ContentPart.source_version_id == run.source_version_id
+                )
             )
         await session.rollback()
 
@@ -386,7 +556,9 @@ async def test_different_run_parts_reject_deletion_from_current_run(document_run
     not os.environ.get("URI_TEST_DATABASE_URL"),
     reason="requires explicitly configured isolated PostgreSQL",
 )
-async def test_failed_normalization_rolls_back_replacement_deletion(document_run) -> None:
+async def test_failed_normalization_rolls_back_replacement_deletion(
+    document_run,
+) -> None:
     """A parser failure must retain old parts because replacement is one transaction."""
     factory, artifact_root, run = document_run
     async with factory() as session:
@@ -406,14 +578,18 @@ async def test_failed_normalization_rolls_back_replacement_deletion(document_run
                 adapter_version="v1",
                 status="failed",
                 parts=[],
-                warnings=[NormalizationWarning(code="parse_error", message="synthetic failure")],
+                warnings=[
+                    NormalizationWarning(
+                        code="parse_error", message="synthetic failure"
+                    )
+                ],
                 parse_coverage=0.0,
             )
 
     with pytest.raises(ValueError, match="Document normalization failed"):
         await persist_normalization(
             factory,
-            _claimed_normalization_job(run),
+            await _claimed_normalization_job(factory),
             artifact_root,
             AdapterRegistry([FailingAdapter()]),
         )
@@ -427,7 +603,9 @@ async def test_failed_normalization_rolls_back_replacement_deletion(document_run
     not os.environ.get("URI_TEST_DATABASE_URL"),
     reason="requires explicitly configured isolated PostgreSQL",
 )
-async def test_partial_insert_failure_rolls_back_replacement_deletion(document_run) -> None:
+async def test_partial_insert_failure_rolls_back_replacement_deletion(
+    document_run,
+) -> None:
     """A database failure after replacement starts must restore the old complete part set."""
     factory, artifact_root, run = document_run
     async with factory() as session:
@@ -466,7 +644,7 @@ async def test_partial_insert_failure_rolls_back_replacement_deletion(document_r
     with pytest.raises(sa.exc.IntegrityError):
         await persist_normalization(
             factory,
-            _claimed_normalization_job(run),
+            await _claimed_normalization_job(factory),
             artifact_root,
             AdapterRegistry([DuplicateOrdinalAdapter()]),
         )

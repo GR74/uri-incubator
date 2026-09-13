@@ -867,6 +867,14 @@ git commit -m "Complete the ingestion foundation"
 
 ## Increment acceptance gate
 
+Scope clarification from final review: this increment captures Git commit metadata
+and selected file snapshots, with inclusive reachability ranges and deterministic
+topological order. Patch-level diffs and DOCX comments/tracked revisions remain
+later fidelity enhancements. Safe normalization provenance and parser warnings
+persist with quality reports. The ClearerMind pilot remains metadata-only until
+explicit repository ranges and conversation selections are supplied; this plan
+does not begin extraction, GraphRAG, or frontend replacement.
+
 Do not begin reviewed extraction or frontend replacement until all of the following are true:
 
 - An empty PostgreSQL 16 database migrates to head with pgvector enabled.

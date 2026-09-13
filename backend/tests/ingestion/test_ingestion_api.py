@@ -104,6 +104,81 @@ async def test_uploaded_markdown_reaches_normalized_terminal_state(
 
 
 @pytest.mark.parametrize(
+    "fixture,family,media_type,status,warning",
+    [
+        ("notebooks/run.json", "notebook_run", "application/json", "normalized", None),
+        (
+            "notebooks/analysis.ipynb",
+            "notebook_run",
+            "application/x-ipynb+json",
+            "normalized",
+            "rich_output_skipped",
+        ),
+        (
+            "document/scanned.pdf",
+            "document",
+            "application/pdf",
+            "needs_ocr",
+            "no_extractable_text",
+        ),
+    ],
+)
+async def test_quality_preserves_normalization_and_source_provenance(
+    client, pilot_owner, pilot_project, fixture, family, media_type, status, warning
+):
+    """Status must preserve parser caveats and evidence links after a complete ingestion cycle."""
+    payload = (Path(__file__).parents[1] / "fixtures" / fixture).read_bytes()
+    headers = {"X-URI-User-ID": str(pilot_owner.id)}
+    created = await client.post(
+        f"/api/projects/{pilot_project.id}/sources/uploads",
+        headers=headers,
+        content=payload,
+        params={
+            "family": family,
+            "external_id": fixture,
+            "native_version": "synthetic-v1",
+            "media_type": media_type,
+        },
+    )
+    assert created.status_code == 202
+    await run_one_worker_job(
+        async_sessionmaker(
+            client._transport.app.state.database_engine, expire_on_commit=False
+        ),
+        artifact_root=client._transport.app.state.settings.artifact_root,
+    )
+    response = await client.get(created.json()["status_url"], headers=headers)
+    quality = response.json()["quality"]
+    if fixture.endswith("run.json"):
+        assert quality["dimensions"]["reproducibility_support"]["level"] == "strong"
+    assert quality["normalization"]["status"] == status
+    assert quality["normalization"]["adapter_version"] == "normalization-v1"
+    assert quality["normalization"]["adapter"] == (
+        "document" if family == "document" else "notebook_run"
+    )
+    assert quality["normalization"]["parse_coverage"] == (
+        0.0 if status == "needs_ocr" else 1.0
+    )
+    if warning:
+        assert warning in {
+            entry["code"]
+            for entry in quality["warnings"]
+            if entry["category"] == "parser"
+        }
+    if fixture.endswith("run.json"):
+        assert quality["dimensions"]["reproducibility_support"]["level"] == "strong"
+    assert "aGVsbG8=" not in response.text
+    if fixture.endswith("analysis.ipynb"):
+        content = await client.get(
+            f"/api/projects/{pilot_project.id}/source-versions/{created.json()['id']}/content",
+            headers=headers,
+        )
+        assert content.status_code == 200
+        assert "synthetic plot" in content.text
+        assert "aGVsbG8=" not in content.text
+
+
+@pytest.mark.parametrize(
     ("family", "media_type", "payload"),
     [
         (
@@ -146,15 +221,23 @@ async def test_generic_participant_rows_are_rejected_before_durable_storage(
         for path in root.rglob("*")
         if path.is_file()
     )
-    async with async_sessionmaker(client._transport.app.state.database_engine)() as session:
+    async with async_sessionmaker(
+        client._transport.app.state.database_engine
+    )() as session:
         assert await session.scalar(sa.text("SELECT count(*) FROM artifacts")) == 0
-        assert await session.scalar(sa.text("SELECT count(*) FROM source_versions")) == 0
+        assert (
+            await session.scalar(sa.text("SELECT count(*) FROM source_versions")) == 0
+        )
         assert await session.scalar(sa.text("SELECT count(*) FROM ingestion_runs")) == 0
 
 
 @pytest.mark.parametrize(
     ("family", "media_type"),
-    [("conversation", "application/json"), ("git", "application/json"), ("unknown", "text/plain")],
+    [
+        ("conversation", "application/json"),
+        ("git", "application/json"),
+        ("unknown", "text/plain"),
+    ],
 )
 async def test_generic_upload_fails_closed_for_reserved_or_unknown_family(
     client: httpx.AsyncClient,
@@ -213,13 +296,22 @@ async def test_notebook_metadata_participant_row_is_purged_before_publication(
         f"/api/projects/{pilot_project.id}/sources/uploads",
         headers={"X-URI-User-ID": str(pilot_owner.id)},
         content=payload,
-        params={"family": "notebook_run", "external_id": "unsafe.ipynb", "native_version": "v1", "media_type": "application/x-ipynb+json"},
+        params={
+            "family": "notebook_run",
+            "external_id": "unsafe.ipynb",
+            "native_version": "v1",
+            "media_type": "application/x-ipynb+json",
+        },
     )
 
     assert response.status_code == 422
     root = client._transport.app.state.settings.artifact_root.parent
-    assert all(marker not in path.read_bytes() for path in root.rglob("*") if path.is_file())
-    async with async_sessionmaker(client._transport.app.state.database_engine)() as session:
+    assert all(
+        marker not in path.read_bytes() for path in root.rglob("*") if path.is_file()
+    )
+    async with async_sessionmaker(
+        client._transport.app.state.database_engine
+    )() as session:
         for table in ("artifacts", "sources", "source_versions", "ingestion_runs"):
             assert await session.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
 
@@ -285,8 +377,10 @@ async def test_valid_generic_source_publishes_one_version_and_queue(
     )
 
     assert response.status_code == 202
-    async with async_sessionmaker(client._transport.app.state.database_engine)() as session:
-        assert await session.scalar(
-            sa.text("SELECT count(*) FROM source_versions")
-        ) == 1
+    async with async_sessionmaker(
+        client._transport.app.state.database_engine
+    )() as session:
+        assert (
+            await session.scalar(sa.text("SELECT count(*) FROM source_versions")) == 1
+        )
         assert await session.scalar(sa.text("SELECT count(*) FROM ingestion_runs")) == 1

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -317,14 +318,45 @@ class ConversationService:
         self.project_id = project_id
         self._stages: dict[str, _Stage] = {}
 
-    def inventory(
-        self, stream: BinaryIO, ttl: timedelta = timedelta(minutes=15)
-    ) -> StagedConversationInventory:
+    def _begin_upload(self) -> tuple[str, Path]:
         self.staging_root.mkdir(parents=True, exist_ok=True)
         os.chmod(self.staging_root, 0o700)
         stage_id = secrets.token_urlsafe(24)
-        staging_path = self.staging_root / stage_id
-        staging_path.mkdir(mode=0o700)
+        # The separately managed intake area is restart-cleanable. Completed
+        # stages become visible only after their durable manifest is present.
+        intake = self.staging_root / ".intake"
+        intake.mkdir(mode=0o700, exist_ok=True)
+        path = intake / stage_id
+        path.mkdir(mode=0o700)
+        self._renew_upload(path)
+        return stage_id, path
+
+    def _renew_upload(self, path: Path) -> None:
+        temporary = path / "upload.next"
+        with temporary.open("w", encoding="utf-8") as output:
+            os.chmod(temporary, 0o600)
+            json.dump(
+                {
+                    "state": "uploading",
+                    "expires_at": (
+                        datetime.now(UTC) + timedelta(minutes=15)
+                    ).isoformat(),
+                },
+                output,
+            )
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path / "upload.json")
+
+    async def _upload_heartbeat(self, path: Path) -> None:
+        while True:
+            await asyncio.sleep(30)
+            self._renew_upload(path)
+
+    def inventory(
+        self, stream: BinaryIO, ttl: timedelta = timedelta(minutes=15)
+    ) -> StagedConversationInventory:
+        stage_id, staging_path = self._begin_upload()
         export_path = staging_path / "export.json"
         digest = hashlib.sha256()
         byte_size = 0
@@ -332,6 +364,7 @@ class ConversationService:
             with export_path.open("xb") as output:
                 os.chmod(export_path, 0o600)
                 while chunk := stream.read(1024 * 1024):
+                    self._renew_upload(staging_path)
                     byte_size += len(chunk)
                     if byte_size > MAX_EXPORT_BYTES:
                         raise ExportMalformed(
@@ -349,14 +382,11 @@ class ConversationService:
     async def inventory_async(
         self, stream: AsyncIterator[bytes], ttl: timedelta = timedelta(minutes=15)
     ) -> StagedConversationInventory:
-        self.staging_root.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.staging_root, 0o700)
-        stage_id = secrets.token_urlsafe(24)
-        staging_path = self.staging_root / stage_id
-        staging_path.mkdir(mode=0o700)
+        stage_id, staging_path = self._begin_upload()
         export_path = staging_path / "export.json"
         digest = hashlib.sha256()
         byte_size = 0
+        heartbeat = asyncio.create_task(self._upload_heartbeat(staging_path))
         try:
             with export_path.open("xb") as output:
                 os.chmod(export_path, 0o600)
@@ -373,9 +403,12 @@ class ConversationService:
                 output.flush()
                 os.fsync(output.fileno())
             return self._finalize_inventory(stage_id, staging_path, digest, ttl)
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             self._purge_path(staging_path)
             raise
+        finally:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
 
     def _finalize_inventory(
         self, stage_id: str, staging_path: Path, digest: object, ttl: timedelta
@@ -389,6 +422,10 @@ class ConversationService:
         )
         stage = _Stage(inventory, digest.hexdigest())
         self._write_manifest(stage)
+        published_path = self.staging_root / stage_id
+        os.replace(staging_path, published_path)
+        (published_path / "upload.json").unlink(missing_ok=True)
+        inventory.staging_path = published_path
         self._stages[stage_id] = stage
         return inventory
 
@@ -568,16 +605,29 @@ def purge_expired_conversation_stages(staging_root: Path) -> StageCleanupResult:
     except OSError:
         return StageCleanupResult(purged, ["staging_root"])
     for staging_path in stage_paths:
+        if staging_path.name == ".intake":
+            result = purge_expired_conversation_stages(staging_path)
+            purged.extend(result.purged_stage_ids)
+            failures.extend(result.failures)
+            continue
         if not staging_path.is_dir():
             continue
         try:
-            payload = json.loads(
-                (staging_path / "stage.json").read_text(encoding="utf-8")
-            )
+            manifest = staging_path / "stage.json"
+            if not manifest.exists():
+                manifest = staging_path / "upload.json"
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
             expires_at = datetime.fromisoformat(payload["expires_at"])
             expired = datetime.now(UTC) >= expires_at
         except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
-            expired = True
+            # A process may die between mkdir and writing its first lease.
+            # A bounded grace period also closes the concurrent mkdir window.
+            try:
+                expired = (
+                    datetime.now(UTC).timestamp() - staging_path.stat().st_mtime >= 900
+                )
+            except OSError:
+                expired = False
         if not expired:
             continue
         try:

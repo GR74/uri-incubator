@@ -554,6 +554,7 @@ async def get_ingestion_status(
         quality = {
             "dimensions": assessment.dimensions,
             "warnings": assessment.warnings,
+            "normalization": assessment.normalization,
             "overall_score": None,
         }
     return IngestionStatusResponse(

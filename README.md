@@ -88,13 +88,68 @@ and declared evidence-selection metadata. It never reads or imports a repository
 or conversation export. It requires explicit repository/ref/commit-range and
 conversation selections before it records that declaration.
 
-```bash
+Install Python 3.11+ and `uv`, and make Docker Compose available. From the repository
+root, copy `.env.example` to `.env`, then start PostgreSQL 16 with pgvector:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d db
 cd backend
-uv run alembic upgrade head
-uv run uri-api
-uv run python scripts/seed_clearermind_pilot.py --repository /explicit/local/path --ref main --start-commit <sha> --end-commit <sha> --conversation-id <selected-id>
-uv run pytest -q
+uv run --env-file ../.env alembic upgrade head
 ```
+
+If Docker runs in WSL, run the Compose command there from the same repository.
+The example passwords are only for these loopback-bound local containers.
+`URI_DATABASE_URL` is required; `URI_ARTIFACT_ROOT` and `URI_STAGING_ROOT` default
+to `backend/.local/`. Set `URI_PILOT_MODE=true` for actor discovery. Lease, poll,
+heartbeat, and retry settings are documented in `.env.example`; the heartbeat
+interval must be shorter than the lease. `uv --env-file` explicitly loads the file.
+
+Start two separate terminals in `backend/` and leave both running:
+
+```powershell
+# Terminal 1: API at http://127.0.0.1:8000
+uv run --env-file ../.env uri-api
+```
+
+```powershell
+# Terminal 2: durable ingestion worker
+uv run --env-file ../.env uri-worker
+```
+
+For an entirely synthetic walkthrough, run this in a third `backend/` terminal:
+
+```powershell
+uv run --env-file ../.env python scripts/seed_clearermind_pilot.py --repository synthetic://example --ref synthetic-main --start-commit aaaaaaa --end-commit bbbbbbb --conversation-id synthetic-conversation --project-name "Synthetic walkthrough"
+$actors = Invoke-RestMethod http://127.0.0.1:8000/api/pilot/actors
+$actor = $actors | Select-Object -Last 1
+$headers = @{ 'X-URI-User-ID' = $actor.id }
+$project = Invoke-RestMethod http://127.0.0.1:8000/api/projects -Method Post -Headers $headers -ContentType application/json -Body '{"name":"Synthetic upload walkthrough"}'
+$url = "http://127.0.0.1:8000/api/projects/$($project.id)/sources/uploads?family=document&external_id=synthetic.md&native_version=v1&media_type=text/markdown"
+$created = Invoke-RestMethod $url -Method Post -Headers $headers -ContentType text/markdown -Body "# Synthetic method`n`nUse the reviewed synthetic pipeline."
+Invoke-RestMethod ("http://127.0.0.1:8000" + $created.status_url) -Headers $headers
+```
+
+Repeat the status request until `status` is `succeeded`; it returns part counts,
+seven quality dimensions, safe parser warnings, and normalization provenance.
+An image-only PDF completes intake with `normalization.status=needs_ocr`; no OCR
+text is invented. The ClearerMind pilot remains metadata-only until the owner
+supplies explicit repository ranges and conversation selections for scoped intake.
+
+Tests require a separately migrated, isolated database; never substitute the
+development URL for `URI_TEST_DATABASE_URL`:
+
+```powershell
+# Repository root
+docker compose --profile test up -d test-db
+cd backend
+uv run --env-file ../.env pytest -q
+```
+
+Git ingestion captures commit metadata and selected file snapshots. Its inclusive
+range is all commits reachable from the end minus ancestors of the start's
+parents, so the start itself and reachable merged changes are retained. Patch-level
+diffs and DOCX comments/tracked revisions are later fidelity enhancements.
 
 On Windows, use `uv run uri-api` for the local API rather than calling Uvicorn
 directly without reload. The launcher selects the event loop required by the

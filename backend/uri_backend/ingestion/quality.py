@@ -10,6 +10,62 @@ from uri_backend.ingestion.contracts import NormalizationResult
 
 QualityLevel = Literal["strong", "partial", "warning", "unknown"]
 
+PARSER_WARNINGS = {
+    "rich_output_skipped": "Embedded binary or rich output was omitted from normalized text.",
+    "no_extractable_text": "PDF requires OCR before text normalization.",
+    "empty_document": "Document contains no extractable text.",
+    "git_exclusions": "Excluded paths were omitted from the Git manifest.",
+    "missing_timestamp": "Source timestamp is absent.",
+    "missing_author": "Source author is absent.",
+}
+
+
+def safe_parser_warnings(normalization: NormalizationResult) -> list[dict[str, str]]:
+    """Never copy parser exception messages or unknown codes into public status."""
+    return [
+        {
+            "category": "parser",
+            "code": warning.code
+            if warning.code in PARSER_WARNINGS
+            else "parser_warning",
+            "message": PARSER_WARNINGS.get(
+                warning.code, "Adapter reported a normalization warning."
+            ),
+        }
+        for warning in normalization.warnings
+    ]
+
+
+def reproducibility_signals(normalization: NormalizationResult) -> list[str]:
+    allowed = {
+        "code_revision",
+        "commit_sha",
+        "dataset_refs",
+        "artifact_refs",
+        "reproducibility_links",
+        "links",
+        "doi",
+        "accession",
+    }
+    found: set[str] = set()
+
+    def visit(value, depth=0):
+        if depth > 40:
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in allowed and child:
+                    found.add(f"{key}_present")
+                if isinstance(child, (dict, list)):
+                    visit(child, depth + 1)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, depth + 1)
+
+    for part in normalization.parts:
+        visit(part.metadata)
+    return sorted(found)
+
 
 class SourceContext(BaseModel):
     family: str
@@ -43,6 +99,7 @@ def assess_source(
 ) -> SourceQualityReport:
     """Describe independent review signals; deliberately do not rank a source."""
     parts = normalization.parts
+    reproduction = reproducibility_signals(normalization)
     decision_parts = sum(
         1
         for part in parts
@@ -84,9 +141,9 @@ def assess_source(
             _dimension(
                 "strong",
                 "Reproducibility links are recorded.",
-                "reproducibility_links_present",
+                *(reproduction or ["reproducibility_links_present"]),
             )
-            if context.has_reproducibility_links
+            if context.has_reproducibility_links or reproduction
             else _dimension(
                 "warning",
                 "No reproducibility links are recorded.",

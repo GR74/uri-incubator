@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import socket
 import sys
 from collections.abc import Awaitable, Callable
@@ -24,13 +25,20 @@ from uri_backend.ingestion.adapters import (
 )
 from uri_backend.ingestion.contracts import AdapterInput
 from uri_backend.ingestion.models import IngestionRun
-from uri_backend.ingestion.quality import SourceContext, assess_source
+from uri_backend.ingestion.quality import (
+    SourceContext,
+    assess_source,
+    safe_parser_warnings,
+)
 from uri_backend.ingestion.queue import (
     ClaimedJob,
-    cancel_job,
+    JobLeaseLost,
     claim_next_job,
     complete_job,
     fail_job,
+    heartbeat_job,
+    owned_claim,
+    release_job,
 )
 from uri_backend.sources.models import (
     Artifact,
@@ -123,30 +131,37 @@ async def persist_normalization(
                 .join(SourceVersion, IngestionRun.source_version_id == SourceVersion.id)
                 .join(Artifact, SourceVersion.artifact_id == Artifact.id)
                 .where(IngestionRun.id == job.run_id)
-                .with_for_update()
             )
         ).one_or_none()
         if record is None:
             raise LookupError(f"Unknown ingestion run {job.run_id}")
         _, version, artifact = record
+        artifact_path = _artifact_path(artifact_root, artifact.storage_key)
+        adapter = registry.resolve(version.family, version.media_type)
+        context = AdapterInput(
+            artifact_path=artifact_path,
+            media_type=version.media_type,
+            family=version.family,
+            metadata=version.metadata_,
+        )
+        version_id, native_version = version.id, version.native_version
+    # Parsing cannot hold locks or block the heartbeat event loop.
+    result = await asyncio.to_thread(adapter.normalize, context)
+    async with sessions() as session, session.begin():
+        await owned_claim(session, job)
+        await session.execute(
+            sa.select(IngestionRun)
+            .where(IngestionRun.id == job.run_id)
+            .with_for_update()
+        )
         await session.execute(
             sa.text("SELECT set_config('uri.ingestion_run_id', :run_id, true)"),
             {"run_id": str(job.run_id)},
         )
         await session.execute(
             sa.delete(ContentPart).where(
-                ContentPart.source_version_id == version.id,
+                ContentPart.source_version_id == version_id,
                 ContentPart.metadata_["ingestion_run_id"].astext == str(job.run_id),
-            )
-        )
-        artifact_path = _artifact_path(artifact_root, artifact.storage_key)
-        adapter = registry.resolve(version.family, version.media_type)
-        result = adapter.normalize(
-            AdapterInput(
-                artifact_path=artifact_path,
-                media_type=version.media_type,
-                family=version.family,
-                metadata=version.metadata_,
             )
         )
         if result.status == "failed":
@@ -155,14 +170,14 @@ async def persist_normalization(
             raise LookupError("Unsupported source adapter")
         report = assess_source(
             SourceContext(
-                family=version.family,
+                family=context.family,
                 has_author=any(part.author_label is not None for part in result.parts),
                 has_source_time=any(
                     part.source_time is not None for part in result.parts
                 ),
-                has_native_version=bool(version.native_version),
+                has_native_version=bool(native_version),
                 has_reproducibility_links=bool(
-                    version.metadata_.get("reproducibility_links")
+                    context.metadata.get("reproducibility_links")
                 ),
             ),
             result,
@@ -170,7 +185,7 @@ async def persist_normalization(
         session.add_all(
             [
                 ContentPart(
-                    source_version_id=version.id,
+                    source_version_id=version_id,
                     ordinal=part.ordinal,
                     kind=part.kind,
                     text=part.text,
@@ -185,12 +200,31 @@ async def persist_normalization(
         assessment_id = await session.scalar(
             pg_insert(SourceQualityAssessment)
             .values(
-                source_version_id=version.id,
+                source_version_id=version_id,
+                normalization={
+                    "status": result.status,
+                    "adapter": result.adapter
+                    if result.adapter
+                    in {
+                        "document",
+                        "git",
+                        "conversation",
+                        "notebook_run",
+                        "reference_manifest",
+                        "lab_notebook",
+                    }
+                    else "unknown",
+                    "adapter_version": result.adapter_version
+                    if result.adapter_version == "normalization-v1"
+                    else "unknown",
+                    "parse_coverage": result.parse_coverage,
+                },
                 dimensions={
                     name: dimension.model_dump()
                     for name, dimension in report.dimensions.items()
                 },
-                warnings=[
+                warnings=safe_parser_warnings(result)
+                + [
                     {"category": "privacy", "message": warning}
                     for warning in report.privacy_warnings
                 ]
@@ -205,10 +239,13 @@ async def persist_normalization(
         if assessment_id is None:
             assessment_id = await session.scalar(
                 sa.select(SourceQualityAssessment.id).where(
-                    SourceQualityAssessment.source_version_id == version.id
+                    SourceQualityAssessment.source_version_id == version_id
                 )
             )
         assert assessment_id is not None
+        await session.flush()
+        # Check wall-clock lease validity again after potentially slow writes.
+        await owned_claim(session, job)
 
 
 async def run_one_worker_job(
@@ -226,9 +263,9 @@ async def run_one_worker_job(
     try:
         await build_normalization_handler(sessions, artifact_root)(claimed)
     except Exception:
-        await _failure_transition(sessions, claimed.id, worker_id)
+        await _failure_transition(sessions, claimed)
         raise
-    await _complete_transition(sessions, claimed.id, worker_id)
+    await _complete_transition(sessions, claimed)
     return True
 
 
@@ -253,19 +290,25 @@ def build_default_dispatcher(
 
 
 async def _complete_transition(
-    sessions: async_sessionmaker[AsyncSession], job_id, worker_id: str
+    sessions: async_sessionmaker[AsyncSession], claimed: ClaimedJob
 ) -> None:
     async with sessions() as session:
-        await complete_job(session, job_id, worker_id)
+        await owned_claim(session, claimed)
+        await complete_job(session, claimed.id, claimed.worker_id)
         await session.commit()
 
 
 async def _failure_transition(
-    sessions: async_sessionmaker[AsyncSession], job_id, worker_id: str
+    sessions: async_sessionmaker[AsyncSession], claimed: ClaimedJob
 ) -> None:
     async with sessions() as session:
+        await owned_claim(session, claimed)
         await fail_job(
-            session, job_id, worker_id, "handler_error", "Worker handler failed"
+            session,
+            claimed.id,
+            claimed.worker_id,
+            "handler_error",
+            "Worker handler failed",
         )
         await session.commit()
 
@@ -275,8 +318,33 @@ async def _await_committed(transition: Awaitable[None]) -> None:
     try:
         await asyncio.shield(task)
     except asyncio.CancelledError:
-        await asyncio.shield(task)
-        raise
+        try:
+            await asyncio.shield(task)
+        finally:
+            raise asyncio.CancelledError
+
+
+async def _release_transition(sessions, claimed):
+    async with sessions() as session:
+        try:
+            await release_job(session, claimed)
+            await session.commit()
+        except JobLeaseLost:
+            await session.rollback()
+
+
+async def _renew_lease(sessions, claimed, lease_seconds, heartbeat_seconds):
+    while True:
+        await asyncio.sleep(heartbeat_seconds)
+        async with sessions() as session:
+            try:
+                await owned_claim(session, claimed)
+                await heartbeat_job(
+                    session, claimed.id, claimed.worker_id, lease_seconds
+                )
+                await session.commit()
+            except JobLeaseLost:
+                return
 
 
 async def run_worker(
@@ -286,47 +354,100 @@ async def run_worker(
     worker_id: str | None = None,
     poll_seconds: float = 1.0,
     lease_seconds: int = 30,
+    heartbeat_seconds: float | None = None,
+    max_attempts: int | None = None,
 ) -> None:
     """Process one committed database transition at a time until cancellation."""
     identity = worker_id or f"{socket.gethostname()}:{os.getpid()}"
     active_dispatcher = dispatcher or DEFAULT_DISPATCHER
+    if heartbeat_seconds is not None and not 0 < heartbeat_seconds < lease_seconds:
+        raise WorkerConfigurationError(
+            "Heartbeat interval must be shorter than the lease"
+        )
     while True:
         async with sessions() as session:
-            claimed = await claim_next_job(session, identity, lease_seconds)
+            claimed = await claim_next_job(
+                session, identity, lease_seconds, max_attempts
+            )
             await session.commit()
         if claimed is None:
             await asyncio.sleep(poll_seconds)
             continue
+        heartbeat = asyncio.create_task(
+            _renew_lease(
+                sessions,
+                claimed,
+                lease_seconds,
+                heartbeat_seconds or lease_seconds / 3,
+            )
+        )
         try:
-            await active_dispatcher.dispatch(claimed)
-        except asyncio.CancelledError:
-            async with sessions() as session:
-                await cancel_job(session, claimed.id, identity)
-                await session.commit()
-            raise
-        except Exception:  # noqa: BLE001 - handler failures become durable job outcomes.
-            await _await_committed(_failure_transition(sessions, claimed.id, identity))
-        else:
-            await _await_committed(_complete_transition(sessions, claimed.id, identity))
+            try:
+                await active_dispatcher.dispatch(claimed)
+            except asyncio.CancelledError:
+                await _await_committed(_release_transition(sessions, claimed))
+                raise
+            except JobLeaseLost:
+                continue
+            except Exception:  # noqa: BLE001 - durable, redacted handler outcome.
+                await _await_committed(_failure_transition(sessions, claimed))
+            else:
+                await _await_committed(_complete_transition(sessions, claimed))
+        except JobLeaseLost:
+            pass
+        finally:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
 
 
 async def run_configured_worker(
     sessions: async_sessionmaker[AsyncSession],
     dispatcher: PipelineDispatcher | None = None,
 ) -> None:
-    active_dispatcher = dispatcher or build_default_dispatcher(sessions)
+    settings = Settings()
+    active_dispatcher = dispatcher or build_default_dispatcher(
+        sessions, settings.artifact_root
+    )
     if not active_dispatcher.has_handlers:
         raise WorkerConfigurationError("No ingestion pipeline handlers are installed")
-    await run_worker(sessions, dispatcher=active_dispatcher)
+    await run_worker(
+        sessions,
+        dispatcher=active_dispatcher,
+        poll_seconds=settings.job_poll_interval_seconds,
+        lease_seconds=settings.job_lease_seconds,
+        heartbeat_seconds=settings.job_heartbeat_interval_seconds,
+        max_attempts=settings.job_max_attempts,
+    )
 
 
 def main() -> None:
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    engine = create_engine(Settings())
-    try:
-        asyncio.run(run_configured_worker(session_factory(engine)))
-    except KeyboardInterrupt:
-        pass
-    finally:
-        asyncio.run(engine.dispose())
+
+    async def serve() -> None:
+        engine = create_engine(Settings())
+        task = asyncio.create_task(run_configured_worker(session_factory(engine)))
+        loop = asyncio.get_running_loop()
+        previous = {}
+
+        def stop(signum, frame):
+            # Repeated signals must not interrupt the protected outcome commit.
+            if not task.cancelling():
+                loop.call_soon_threadsafe(task.cancel)
+
+        for signum in (
+            signal.SIGINT,
+            signal.SIGTERM,
+            *([signal.SIGBREAK] if sys.platform == "win32" else []),
+        ):
+            previous[signum] = signal.signal(signum, stop)
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+            await engine.dispose()
+
+    asyncio.run(serve())

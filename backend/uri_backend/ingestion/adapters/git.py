@@ -24,7 +24,9 @@ MAX_GIT_BLOB_BYTES = 1_000_000
 _OBJECT_ID = re.compile(r"^[0-9a-fA-F]{7,64}$")
 _WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:")
 _SECRET_PATH = re.compile(
-    r"(?:^|/)(?:\.?(?:env|npmrc)|.*(?:secret|credential|password|token|private[_-]?key).*)(?:$|/)",
+    r"(?:^|/)(?:\.?env(?:\.[^/]*)?|\.npmrc|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.[^/]*)?|"
+    r"[^/]*\.(?:pem|key|p12|pfx|crt|cer|der|jks|keystore)|"
+    r"(?:[^/]*[._-])?(?:secrets?|credentials?|passwords?|tokens?|private[_-]?key)(?:[._-][^/]*)?)(?:$|/)",
     re.IGNORECASE,
 )
 
@@ -63,6 +65,7 @@ class GitInventory:
     commits: list[GitCommit]
     files: list[GitFile]
     exclusions: list[dict[str, str]]
+    range_metadata: dict[str, str]
 
     @property
     def total_allowed_bytes(self) -> int:
@@ -71,6 +74,7 @@ class GitInventory:
     def manifest(self) -> dict[str, Any]:
         return {
             "schema_version": 1,
+            "range": self.range_metadata,
             "resolved_head_sha": self.resolved_head_sha,
             "commits": [
                 {
@@ -116,7 +120,23 @@ class GitAdapter:
             raise InvalidGitRange("Commits are not a connected range on the named ref.")
         commits = self._commits(root, start, end)
         files, exclusions = self._files(root, end, command.include_paths)
-        return GitInventory(root, git_directory, head, commits, files, exclusions)
+        return GitInventory(
+            root,
+            git_directory,
+            head,
+            commits,
+            files,
+            exclusions,
+            {
+                "ref_name": command.ref_name,
+                "resolved_ref_sha": head,
+                "requested_start": command.start_commit,
+                "requested_end": command.end_commit,
+                "resolved_start_sha": start,
+                "resolved_end_sha": end,
+                "policy": "inclusive_start_exclude_start_ancestors",
+            },
+        )
 
     def manifest_bytes(self, inventory: GitInventory) -> bytes:
         return json.dumps(
@@ -268,11 +288,12 @@ class GitAdapter:
         return result.returncode == 0
 
     def _commits(self, root: Path, start: str, end: str) -> list[GitCommit]:
-        all_shas = self._git(root, "rev-list", "--reverse", end).splitlines()
-        try:
-            shas = all_shas[all_shas.index(start) :]
-        except ValueError as error:
-            raise InvalidGitRange("Range start is not reachable.") from error
+        # Reach(end) minus Reach(parents(start)); deliberately retain start.
+        # Topological traversal is stable even with skewed commit timestamps.
+        parents = self._git(root, "show", "-s", "--format=%P", start).split()
+        shas = self._git(
+            root, "rev-list", "--topo-order", "--reverse", end, "--not", *parents
+        ).splitlines()
         result: list[GitCommit] = []
         for sha in shas:
             fields = self._git(

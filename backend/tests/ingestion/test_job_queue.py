@@ -42,20 +42,32 @@ async def clean_ingestion_tables(db_engine: AsyncEngine) -> None:
 
 @pytest_asyncio.fixture
 async def source_version_id(db_engine: AsyncEngine) -> UUID:
-    project_id, user_id, source_id, artifact_id, version_id = (uuid4() for _ in range(5))
+    project_id, user_id, source_id, artifact_id, version_id = (
+        uuid4() for _ in range(5)
+    )
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
         session.add_all(
             [
                 User(id=user_id, display_name="Queue tester", is_pilot_actor=True),
                 Project(id=project_id, name="Queue project"),
-                Artifact(id=artifact_id, sha256="2" * 64, storage_key="22/" + "2" * 62, byte_size=1),
+                Artifact(
+                    id=artifact_id,
+                    sha256="2" * 64,
+                    storage_key="22/" + "2" * 62,
+                    byte_size=1,
+                ),
             ]
         )
         await session.flush()
         session.add_all(
             [
                 ProjectMembership(user_id=user_id, project_id=project_id, role="owner"),
-                Source(id=source_id, project_id=project_id, family="document", external_id="queue.md"),
+                Source(
+                    id=source_id,
+                    project_id=project_id,
+                    family="document",
+                    external_id="queue.md",
+                ),
             ]
         )
         await session.flush()
@@ -95,7 +107,9 @@ async def test_two_workers_cannot_claim_the_same_job(
 ) -> None:
     """Removing SKIP LOCKED or the lock lets concurrent workers duplicate processing."""
     run = await enqueue(db_engine, source_version_id)
-    first, second = await asyncio.gather(claim(db_engine, "worker-a"), claim(db_engine, "worker-b"))
+    first, second = await asyncio.gather(
+        claim(db_engine, "worker-a"), claim(db_engine, "worker-b")
+    )
 
     claimed = [job for job in (first, second) if job is not None]
     assert [job.run_id for job in claimed] == [run.id]
@@ -135,7 +149,9 @@ async def test_worker_must_own_a_live_lease_to_transition_job(
             await complete_job(session, claimed.id, "worker-b")
         await session.rollback()
 
-        heartbeat = await heartbeat_job(session, claimed.id, "worker-a", lease_seconds=30)
+        heartbeat = await heartbeat_job(
+            session, claimed.id, "worker-a", lease_seconds=30
+        )
         assert heartbeat.worker_id == "worker-a"
         completed = await complete_job(session, claimed.id, "worker-a")
         await session.commit()
@@ -149,7 +165,9 @@ async def test_failure_retries_then_records_a_bounded_terminal_error(
     """Skipping the retry cap causes permanently failing sources to run without bound."""
     run = await enqueue(db_engine, source_version_id)
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
-        job = await session.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
+        job = await session.scalar(
+            sa.select(IngestionJob).where(IngestionJob.run_id == run.id)
+        )
         assert job is not None
         job.max_attempts = 2
         await session.commit()
@@ -157,14 +175,18 @@ async def test_failure_retries_then_records_a_bounded_terminal_error(
     first = await claim(db_engine, "worker-a")
     assert first is not None
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
-        retried = await fail_job(session, first.id, "worker-a", "parse_error", "x" * 5000)
+        retried = await fail_job(
+            session, first.id, "worker-a", "parse_error", "x" * 5000
+        )
         await session.commit()
     assert retried.status == "queued"
 
     second = await claim(db_engine, "worker-b")
     assert second is not None and second.attempt == 2
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
-        failed = await fail_job(session, second.id, "worker-b", "parse_error", "x" * 5000)
+        failed = await fail_job(
+            session, second.id, "worker-b", "parse_error", "x" * 5000
+        )
         await session.commit()
 
     assert failed.status == "failed"
@@ -182,7 +204,10 @@ async def test_enqueue_is_idempotent_per_source_version_and_pipeline(
 
     assert first.id == second.id
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
-        assert await session.scalar(sa.select(sa.func.count()).select_from(IngestionRun)) == 1
+        assert (
+            await session.scalar(sa.select(sa.func.count()).select_from(IngestionRun))
+            == 1
+        )
 
 
 async def test_cancel_requires_owner_and_is_terminal(
@@ -220,10 +245,14 @@ async def test_expired_lease_closes_the_prior_attempt_before_retrying(
     retry = await claim(db_engine, "worker-b")
     assert retry is not None
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
-        history = (await session.execute(
-            sa.text("SELECT outcome, error_code, finished_at FROM ingestion_job_attempts WHERE job_id = :job_id AND attempt = 1"),
-            {"job_id": first.id},
-        )).one()
+        history = (
+            await session.execute(
+                sa.text(
+                    "SELECT outcome, error_code, finished_at FROM ingestion_job_attempts WHERE job_id = :job_id AND attempt = 1"
+                ),
+                {"job_id": first.id},
+            )
+        ).one()
 
     assert history.outcome == "lease_expired"
     assert history.error_code == "lease_expired"
@@ -236,7 +265,9 @@ async def test_final_expired_lease_closes_the_prior_attempt_before_terminal_fail
     """A maxed-out lost lease must close history before its job becomes terminal."""
     run = await enqueue(db_engine, source_version_id)
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
-        job = await session.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
+        job = await session.scalar(
+            sa.select(IngestionJob).where(IngestionJob.run_id == run.id)
+        )
         assert job is not None
         job.max_attempts = 1
         await session.commit()
@@ -252,11 +283,17 @@ async def test_final_expired_lease_closes_the_prior_attempt_before_terminal_fail
 
     assert await claim(db_engine, "worker-b") is None
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
-        history = (await session.execute(
-            sa.text("SELECT outcome, error_code, finished_at FROM ingestion_job_attempts WHERE job_id = :job_id"),
-            {"job_id": first.id},
-        )).one()
-        status = await session.scalar(sa.select(IngestionJob.status).where(IngestionJob.id == first.id))
+        history = (
+            await session.execute(
+                sa.text(
+                    "SELECT outcome, error_code, finished_at FROM ingestion_job_attempts WHERE job_id = :job_id"
+                ),
+                {"job_id": first.id},
+            )
+        ).one()
+        status = await session.scalar(
+            sa.select(IngestionJob.status).where(IngestionJob.id == first.id)
+        )
 
     assert history.outcome == "lease_expired"
     assert history.error_code == "lease_expired"
@@ -275,13 +312,23 @@ async def test_error_detail_is_redacted_before_persistence(
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
         await fail_job(session, claimed.id, "worker-a", "parse_error", secret)
         await session.commit()
-        persisted = (await session.execute(
-            sa.text("SELECT error_detail FROM ingestion_jobs UNION ALL SELECT error_detail FROM ingestion_runs UNION ALL SELECT error_detail FROM ingestion_job_attempts")
-        )).scalars().all()
+        persisted = (
+            (
+                await session.execute(
+                    sa.text(
+                        "SELECT error_detail FROM ingestion_jobs UNION ALL SELECT error_detail FROM ingestion_runs UNION ALL SELECT error_detail FROM ingestion_job_attempts"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
     assert all(secret not in (detail or "") for detail in persisted)
     assert all("sk-live" not in (detail or "") for detail in persisted)
-    assert all("participant private methods" not in (detail or "") for detail in persisted)
+    assert all(
+        "participant private methods" not in (detail or "") for detail in persisted
+    )
 
 
 async def test_error_code_is_sanitized_and_bounded_before_attempt_persistence(
@@ -295,9 +342,17 @@ async def test_error_code_is_sanitized_and_bounded_before_attempt_persistence(
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
         await fail_job(session, claimed.id, "worker-a", unsafe_code, "safe detail")
         await session.commit()
-        codes = (await session.execute(
-            sa.text("SELECT error_code FROM ingestion_jobs UNION ALL SELECT error_code FROM ingestion_runs UNION ALL SELECT error_code FROM ingestion_job_attempts")
-        )).scalars().all()
+        codes = (
+            (
+                await session.execute(
+                    sa.text(
+                        "SELECT error_code FROM ingestion_jobs UNION ALL SELECT error_code FROM ingestion_runs UNION ALL SELECT error_code FROM ingestion_job_attempts"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
     assert all(len(code or "") <= 100 for code in codes)
     assert all("sk-live" not in (code or "") for code in codes)
@@ -317,7 +372,9 @@ async def test_worker_dispatches_registered_pipeline_then_stops_cleanly(
     dispatcher.register("test-pipeline", handler)
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
     worker = asyncio.create_task(
-        run_worker(factory, dispatcher=dispatcher, worker_id="worker-a", poll_seconds=10)
+        run_worker(
+            factory, dispatcher=dispatcher, worker_id="worker-a", poll_seconds=10
+        )
     )
     await asyncio.wait_for(handled.wait(), timeout=2)
     await asyncio.sleep(0)
@@ -350,7 +407,11 @@ async def test_worker_cancellation_commits_failure_transition(
 
     dispatcher.register("test-pipeline", failing_handler)
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
-    worker = asyncio.create_task(run_worker(factory, dispatcher=dispatcher, worker_id="worker-a", poll_seconds=10))
+    worker = asyncio.create_task(
+        run_worker(
+            factory, dispatcher=dispatcher, worker_id="worker-a", poll_seconds=10
+        )
+    )
     await asyncio.wait_for(failure_started.wait(), timeout=2)
     worker.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -358,7 +419,202 @@ async def test_worker_cancellation_commits_failure_transition(
 
     async with factory() as session:
         status = await session.scalar(sa.select(IngestionJob.status))
-        attempts = await session.scalar(sa.select(sa.func.count()).select_from(IngestionJobAttempt))
+        attempts = await session.scalar(
+            sa.select(sa.func.count()).select_from(IngestionJobAttempt)
+        )
 
     assert status == "queued"
     assert attempts == 1
+
+
+async def test_worker_renews_lease_during_long_handler(db_engine, source_version_id):
+    """Without production heartbeats a second worker reclaims live long-running work."""
+    await enqueue(db_engine, source_version_id)
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    started, release = asyncio.Event(), asyncio.Event()
+    dispatcher = PipelineDispatcher()
+
+    async def handler(job):
+        started.set()
+        await release.wait()
+
+    dispatcher.register("test-pipeline", handler)
+    worker = asyncio.create_task(
+        run_worker(
+            factory, dispatcher, worker_id="long", lease_seconds=1, poll_seconds=0.02
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), 3)
+        await asyncio.sleep(1.3)
+        contenders = await asyncio.gather(
+            claim(db_engine, "reclaimer-a"), claim(db_engine, "reclaimer-b")
+        )
+        assert contenders == [None, None]
+        release.set()
+        for _ in range(50):
+            async with factory() as session:
+                if await session.scalar(sa.select(IngestionJob.status)) == "succeeded":
+                    break
+            await asyncio.sleep(0.02)
+        else:
+            pytest.fail("long-running job did not finish")
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_shutdown_leaves_processing_job_retryable(db_engine, source_version_id):
+    """Process shutdown must not become an explicit terminal job cancellation."""
+    await enqueue(db_engine, source_version_id)
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    started = asyncio.Event()
+    dispatcher = PipelineDispatcher()
+
+    async def handler(job):
+        started.set()
+        await asyncio.Event().wait()
+
+    dispatcher.register("test-pipeline", handler)
+    worker = asyncio.create_task(run_worker(factory, dispatcher, worker_id="shutdown"))
+    await asyncio.wait_for(started.wait(), 3)
+    worker.cancel()
+    await asyncio.gather(worker, return_exceptions=True)
+    async with factory() as session:
+        assert await session.scalar(sa.select(IngestionJob.status)) == "queued"
+    assert (await claim(db_engine, "after-restart")).attempt == 2
+
+
+async def test_lost_lease_does_not_kill_worker_loop(db_engine, source_version_id):
+    """A handler finishing after lease loss must leave the loop available for later jobs."""
+    await enqueue(db_engine, source_version_id)
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    expired = asyncio.Event()
+    dispatcher = PipelineDispatcher()
+
+    async def handler(job):
+        async with factory() as session:
+            await session.execute(
+                sa.update(IngestionJob)
+                .where(IngestionJob.id == job.id)
+                .values(lease_expires_at=sa.func.now() - timedelta(seconds=1))
+            )
+            await session.commit()
+        expired.set()
+
+    dispatcher.register("test-pipeline", handler)
+    worker = asyncio.create_task(
+        run_worker(factory, dispatcher, worker_id="lost", poll_seconds=0.05)
+    )
+    try:
+        await asyncio.wait_for(expired.wait(), 3)
+        await asyncio.sleep(0.2)
+        assert not worker.done()
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_configured_worker_uses_retry_limit(
+    db_engine, source_version_id, monkeypatch
+):
+    """The configured retry cap must affect jobs consumed by the console production path."""
+    from uri_backend.ingestion.worker import run_configured_worker
+
+    monkeypatch.setenv("URI_JOB_MAX_ATTEMPTS", "1")
+    monkeypatch.setenv("URI_JOB_POLL_INTERVAL_SECONDS", "0.01")
+    await enqueue(db_engine, source_version_id)
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    dispatcher = PipelineDispatcher()
+
+    async def handler(job):
+        raise ValueError("synthetic failure")
+
+    dispatcher.register("test-pipeline", handler)
+    worker = asyncio.create_task(run_configured_worker(factory, dispatcher))
+    try:
+        for _ in range(100):
+            async with factory() as session:
+                job = await session.scalar(sa.select(IngestionJob))
+                if job.status == "failed":
+                    assert job.attempt == 1
+                    break
+            await asyncio.sleep(0.02)
+        else:
+            pytest.fail("configured retry cap was not applied")
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_old_attempt_cannot_complete_reclaim_with_same_worker_name(
+    db_engine, source_version_id
+):
+    """A reused worker label must not authorize completion of a different attempt."""
+    await enqueue(db_engine, source_version_id)
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    reclaimed = asyncio.Event()
+    dispatcher = PipelineDispatcher()
+
+    async def handler(job):
+        async with factory() as session:
+            await session.execute(
+                sa.update(IngestionJob)
+                .where(IngestionJob.id == job.id)
+                .values(lease_expires_at=sa.func.now() - timedelta(seconds=1))
+            )
+            await session.commit()
+        async with factory() as session:
+            assert (await claim_next_job(session, "reused-name", 30)).attempt == 2
+            await session.commit()
+        reclaimed.set()
+
+    dispatcher.register("test-pipeline", handler)
+    worker = asyncio.create_task(
+        run_worker(factory, dispatcher, worker_id="reused-name", poll_seconds=0.05)
+    )
+    try:
+        await asyncio.wait_for(reclaimed.wait(), 3)
+        await asyncio.sleep(0.15)
+        async with factory() as session:
+            assert await session.scalar(sa.select(IngestionJob.status)) == "running"
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_process_signal_shutdown_requeues_current_job(
+    db_engine, source_version_id, cli_environment
+):
+    """SIGTERM must run the production shutdown transition instead of abandoning running work."""
+    import subprocess
+    import sys
+
+    await enqueue(db_engine, source_version_id)
+    script = """
+import asyncio, signal, threading
+import uri_backend.ingestion.worker as worker
+dispatcher = worker.PipelineDispatcher()
+async def slow(job):
+    threading.Timer(.2, lambda: signal.raise_signal(signal.SIGTERM)).start()
+    await asyncio.sleep(60)
+dispatcher.register('test-pipeline', slow)
+worker.build_default_dispatcher = lambda *args: dispatcher
+worker.main()
+"""
+    result = await asyncio.to_thread(
+        subprocess.run,
+        [sys.executable, "-c", script],
+        env={
+            **cli_environment,
+            "URI_JOB_LEASE_SECONDS": "1",
+            "URI_JOB_HEARTBEAT_INTERVAL_SECONDS": "0.1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    async with async_sessionmaker(db_engine)() as session:
+        assert await session.scalar(sa.select(IngestionJob.status)) == "queued"
+    assert result.returncode == 0, result.stderr

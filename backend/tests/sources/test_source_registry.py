@@ -135,6 +135,61 @@ def approve_git_root(client: httpx.AsyncClient, project_id: UUID, root: Path) ->
     }
 
 
+async def test_git_registration_excludes_secret_bytes_with_broad_paths(
+    client, source_fixture, tmp_path
+):
+    """Secret exclusions must apply before immutable registration, not just preview display."""
+    root = tmp_path / "secret-fixtures"
+    create_synthetic_git_repository(root)
+    for name in [
+        ".env.local",
+        ".env.production",
+        "id_rsa",
+        "certificate.pem",
+        "access-token.json",
+    ]:
+        (root / name).write_text("REGISTRATION_SECRET_MARKER", encoding="utf-8")
+    await asyncio.to_thread(
+        subprocess.run,
+        ["git", "-C", str(root), "add", "."],
+        check=True,
+        capture_output=True,
+    )
+    await asyncio.to_thread(
+        subprocess.run,
+        ["git", "-C", str(root), "commit", "-m", "Add exclusions"],
+        check=True,
+        capture_output=True,
+    )
+    sha = (
+        await asyncio.to_thread(
+            subprocess.check_output,
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            text=True,
+        )
+    ).strip()
+    approve_git_root(client, source_fixture.project_id, root)
+    response = await client.post(
+        f"/api/projects/{source_fixture.project_id}/sources/git",
+        headers={"X-URI-User-ID": str(source_fixture.actor_id)},
+        json={
+            "repository_root": str(root),
+            "ref_name": "refs/heads/pilot",
+            "start_commit": sha,
+            "end_commit": sha,
+            "include_paths": ["**"],
+        },
+    )
+    assert response.status_code == 201
+    artifacts = list((tmp_path / "artifacts").rglob("*"))
+    assert any(path.is_file() for path in artifacts)
+    assert all(
+        b"REGISTRATION_SECRET_MARKER" not in path.read_bytes()
+        for path in artifacts
+        if path.is_file()
+    )
+
+
 async def test_same_source_version_is_idempotent(
     db_engine: AsyncEngine, source_fixture: SourceFixture
 ) -> None:
@@ -336,7 +391,9 @@ async def test_git_registration_persists_an_immutable_manifest(
     assert response.status_code == 201
     assert response.json()["family"] == "git"
     artifacts = list((tmp_path / "artifacts").rglob("*"))
-    manifest = next(path for path in artifacts if path.is_file()).read_text(encoding="ascii")
+    manifest = next(path for path in artifacts if path.is_file()).read_text(
+        encoding="ascii"
+    )
     assert '"resolved_head_sha"' in manifest
     assert "synthetic methods" in manifest
 
