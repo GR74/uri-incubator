@@ -16,12 +16,12 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def _citation_table(name: str, owner_column: str, owner_table: str) -> None:
+def _citation_table(name: str, owner_column: str, owner_table: str, *, cascade: bool = False) -> None:
     uuid = postgresql.UUID(as_uuid=True)
     op.create_table(
         name,
         sa.Column("id", uuid, primary_key=True),
-        sa.Column(owner_column, uuid, sa.ForeignKey(f"{owner_table}.id"), nullable=False),
+        sa.Column(owner_column, uuid, sa.ForeignKey(f"{owner_table}.id", ondelete="CASCADE" if cascade else None), nullable=False),
         sa.Column("content_part_id", uuid, sa.ForeignKey("content_parts.id"), nullable=False),
         sa.Column("quote", sa.Text, nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
@@ -33,7 +33,7 @@ def _citation_table(name: str, owner_column: str, owner_table: str) -> None:
 def _immutable(table: str) -> None:
     function = f"prevent_{table}_mutation"
     op.execute(
-        f"CREATE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$ "
+        f"CREATE OR REPLACE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$ "
         f"BEGIN RAISE EXCEPTION '{table} are immutable'; END; $$"
     )
     op.execute(
@@ -45,8 +45,8 @@ def _immutable(table: str) -> None:
 def upgrade() -> None:
     uuid, timestamp, jsonb = postgresql.UUID(as_uuid=True), sa.DateTime(timezone=True), postgresql.JSONB
     candidate_types = "'decision', 'method', 'result', 'dead_end', 'blocker', 'next_step', 'claim', 'dataset', 'protocol', 'experiment', 'analysis_run', 'artifact_reference', 'project_event'"
-    relation_types = "'supports', 'contradicts', 'derived_from', 'uses', 'produces', 'blocks', 'supersedes', 'related_to'"
-    draft_statuses = "'draft', 'submitted', 'changes_requested', 'approved', 'published'"
+    relation_types = "'proposes', 'accepts', 'rejects', 'explains', 'implements', 'tests', 'uses', 'produces', 'supports', 'challenges', 'summarizes', 'cites', 'defines', 'deviates_from', 'assigned_to', 'reviewed_by', 'supersedes', 'belongs_to', 'continued_from'"
+    draft_statuses = "'draft', 'pending_review', 'changes_requested', 'approved', 'published'"
     review_decisions = "'approve', 'request_changes'"
 
     op.create_table(
@@ -80,7 +80,7 @@ def upgrade() -> None:
         sa.CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_draft_candidate_confidence"),
         sa.CheckConstraint("version > 0", name="ck_draft_candidate_version"),
     )
-    _citation_table("candidate_citations", "candidate_id", "draft_candidates")
+    _citation_table("candidate_citations", "candidate_id", "draft_candidates", cascade=True)
     op.create_table(
         "draft_relations",
         sa.Column("id", uuid, primary_key=True),
@@ -95,7 +95,7 @@ def upgrade() -> None:
         sa.CheckConstraint("source_candidate_id <> target_candidate_id", name="ck_draft_relation_distinct_endpoints"),
         sa.CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="ck_draft_relation_confidence"),
     )
-    _citation_table("draft_relation_citations", "draft_relation_id", "draft_relations")
+    _citation_table("draft_relation_citations", "draft_relation_id", "draft_relations", cascade=True)
     op.create_table(
         "reviews",
         sa.Column("id", uuid, primary_key=True),
@@ -108,6 +108,16 @@ def upgrade() -> None:
         sa.CheckConstraint(f"decision IN ({review_decisions})", name="ck_review_decision"),
         sa.CheckConstraint("draft_version > 0", name="ck_review_draft_version"),
         sa.UniqueConstraint("draft_set_id", "draft_version", "reviewer_id", name="uq_review_draft_version_reviewer"),
+    )
+    op.create_table(
+        "graph_entities",
+        sa.Column("id", uuid, primary_key=True),
+        sa.Column("project_id", uuid, sa.ForeignKey("projects.id"), nullable=False),
+        sa.Column("entity_type", sa.String(32), nullable=False),
+        sa.Column("native_id", uuid, nullable=False),
+        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("now()")),
+        sa.CheckConstraint("entity_type IN ('project', 'record', 'source', 'artifact', 'research_item', 'person')", name="ck_graph_entity_type"),
+        sa.UniqueConstraint("project_id", "entity_type", "native_id", name="uq_graph_entity_native"),
     )
     op.create_table(
         "records",
@@ -139,12 +149,12 @@ def upgrade() -> None:
         "relations",
         sa.Column("id", uuid, primary_key=True),
         sa.Column("project_id", uuid, sa.ForeignKey("projects.id"), nullable=False),
-        sa.Column("source_record_id", uuid, sa.ForeignKey("records.id"), nullable=False),
-        sa.Column("target_record_id", uuid, sa.ForeignKey("records.id"), nullable=False),
+        sa.Column("source_entity_id", uuid, sa.ForeignKey("graph_entities.id"), nullable=False),
+        sa.Column("target_entity_id", uuid, sa.ForeignKey("graph_entities.id"), nullable=False),
         sa.Column("relation_type", sa.String(32), nullable=False),
         sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("now()")),
         sa.CheckConstraint(f"relation_type IN ({relation_types})", name="ck_relation_type"),
-        sa.CheckConstraint("source_record_id <> target_record_id", name="ck_relation_distinct_endpoints"),
+        sa.CheckConstraint("source_entity_id <> target_entity_id", name="ck_relation_distinct_endpoints"),
     )
     _citation_table("relation_citations", "relation_id", "relations")
     op.create_table(
@@ -166,6 +176,11 @@ def upgrade() -> None:
           ELSIF TG_TABLE_NAME = 'draft_relation_citations' THEN owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.draft_relation_id ELSE NEW.draft_relation_id END;
           ELSIF TG_TABLE_NAME = 'record_citations' THEN owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.record_version_id ELSE NEW.record_version_id END;
           ELSE owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.relation_id ELSE NEW.relation_id END;
+          END IF;
+          IF TG_TABLE_NAME = 'candidate_citations' THEN PERFORM 1 FROM draft_candidates WHERE id = owner_id FOR UPDATE;
+          ELSIF TG_TABLE_NAME = 'draft_relation_citations' THEN PERFORM 1 FROM draft_relations WHERE id = owner_id FOR UPDATE;
+          ELSIF TG_TABLE_NAME = 'record_citations' THEN PERFORM 1 FROM record_versions WHERE id = owner_id FOR UPDATE;
+          ELSE PERFORM 1 FROM relations WHERE id = owner_id FOR UPDATE;
           END IF;
           IF TG_TABLE_NAME = 'candidate_citations' AND EXISTS (
             SELECT 1 FROM candidate_citations cc JOIN draft_candidates dc ON dc.id = cc.candidate_id
@@ -205,7 +220,7 @@ def upgrade() -> None:
           IF TG_TABLE_NAME = 'record_versions' AND NOT EXISTS (SELECT 1 FROM record_citations WHERE record_version_id = owner_id) THEN RAISE EXCEPTION 'record version requires a citation'; END IF;
           IF TG_TABLE_NAME = 'relations' THEN
             IF NOT EXISTS (SELECT 1 FROM relation_citations WHERE relation_id = owner_id) THEN RAISE EXCEPTION 'relation requires a citation'; END IF;
-            IF EXISTS (SELECT 1 FROM relations rel JOIN records src ON src.id = rel.source_record_id JOIN records dst ON dst.id = rel.target_record_id WHERE rel.id = owner_id AND (src.project_id <> rel.project_id OR dst.project_id <> rel.project_id)) THEN RAISE EXCEPTION 'relation endpoints must belong to its project'; END IF;
+            IF EXISTS (SELECT 1 FROM relations rel JOIN graph_entities src ON src.id = rel.source_entity_id JOIN graph_entities dst ON dst.id = rel.target_entity_id WHERE rel.id = owner_id AND ((rel.relation_type <> 'continued_from' AND (src.project_id <> rel.project_id OR dst.project_id <> rel.project_id)) OR (rel.relation_type = 'continued_from' AND (src.entity_type <> 'project' OR dst.entity_type <> 'project')))) THEN RAISE EXCEPTION 'relation endpoints violate graph project scope'; END IF;
           END IF;
           IF TG_TABLE_NAME = 'supersessions' AND EXISTS (SELECT 1 FROM supersessions s JOIN record_versions oldv ON oldv.id = s.predecessor_version_id JOIN record_versions newv ON newv.id = s.successor_version_id WHERE s.id = owner_id AND (oldv.record_id <> newv.record_id OR oldv.version >= newv.version)) THEN RAISE EXCEPTION 'supersession must link a later version of the same record'; END IF;
           RETURN NULL;
@@ -222,6 +237,11 @@ def upgrade() -> None:
           ELSIF TG_TABLE_NAME = 'record_citations' THEN owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.record_version_id ELSE NEW.record_version_id END;
           ELSE owner_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.relation_id ELSE NEW.relation_id END;
           END IF;
+          IF TG_TABLE_NAME = 'candidate_citations' THEN PERFORM 1 FROM draft_candidates WHERE id = owner_id FOR UPDATE;
+          ELSIF TG_TABLE_NAME = 'draft_relation_citations' THEN PERFORM 1 FROM draft_relations WHERE id = owner_id FOR UPDATE;
+          ELSIF TG_TABLE_NAME = 'record_citations' THEN PERFORM 1 FROM record_versions WHERE id = owner_id FOR UPDATE;
+          ELSE PERFORM 1 FROM relations WHERE id = owner_id FOR UPDATE;
+          END IF;
           IF TG_TABLE_NAME = 'candidate_citations' AND EXISTS (SELECT 1 FROM draft_candidates WHERE id = owner_id) AND NOT EXISTS (SELECT 1 FROM candidate_citations WHERE candidate_id = owner_id) THEN RAISE EXCEPTION 'draft candidate requires a citation'; END IF;
           IF TG_TABLE_NAME = 'draft_relation_citations' AND EXISTS (SELECT 1 FROM draft_relations WHERE id = owner_id) AND NOT EXISTS (SELECT 1 FROM draft_relation_citations WHERE draft_relation_id = owner_id) THEN RAISE EXCEPTION 'draft relation requires a citation'; END IF;
           IF TG_TABLE_NAME = 'record_citations' AND EXISTS (SELECT 1 FROM record_versions WHERE id = owner_id) AND NOT EXISTS (SELECT 1 FROM record_citations WHERE record_version_id = owner_id) THEN RAISE EXCEPTION 'record version requires a citation'; END IF;
@@ -231,6 +251,21 @@ def upgrade() -> None:
     """)
     for table in ("candidate_citations", "draft_relation_citations", "record_citations", "relation_citations"):
         op.execute(f"CREATE CONSTRAINT TRIGGER {table}_owner_citation_integrity AFTER INSERT OR UPDATE OR DELETE ON {table} DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION validate_knowledge_citation_presence()")
+    op.execute("""
+        CREATE FUNCTION prevent_knowledge_identity_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF TG_TABLE_NAME = 'draft_sets' AND NEW.project_id <> OLD.project_id THEN RAISE EXCEPTION 'draft set project identity is immutable'; END IF;
+          IF TG_TABLE_NAME = 'draft_candidates' AND NEW.draft_set_id <> OLD.draft_set_id THEN RAISE EXCEPTION 'draft candidate set identity is immutable'; END IF;
+          IF TG_TABLE_NAME = 'records' AND (NEW.project_id <> OLD.project_id OR NEW.record_type <> OLD.record_type) THEN RAISE EXCEPTION 'record identity is immutable'; END IF;
+          IF TG_TABLE_NAME = 'graph_entities' AND (NEW.project_id <> OLD.project_id OR NEW.entity_type <> OLD.entity_type OR NEW.native_id <> OLD.native_id) THEN RAISE EXCEPTION 'graph entity identity is immutable'; END IF;
+          RETURN NEW;
+        END; $$
+    """)
+    for table in ("draft_sets", "draft_candidates", "records", "graph_entities"):
+        op.execute(f"CREATE TRIGGER {table}_identity_immutable BEFORE UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION prevent_knowledge_identity_mutation()")
+    _immutable("reviews")
+    _immutable("records")
+    _immutable("graph_entities")
     _immutable("record_versions")
     _immutable("record_citations")
     _immutable("relations")
@@ -239,16 +274,27 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    for table in ("supersessions", "relation_citations", "relations", "record_citations", "record_versions"):
-        op.execute(f"DROP TRIGGER {table}_append_only ON {table}")
-        op.execute(f"DROP FUNCTION prevent_{table}_mutation()")
+    for table in ("supersessions", "relation_citations", "relations", "record_citations", "record_versions", "records", "reviews"):
+        op.execute(f"DROP TRIGGER IF EXISTS {table}_append_only ON {table}")
+        op.execute(f"DROP FUNCTION IF EXISTS prevent_{table}_mutation()")
     for table in ("candidate_citations", "draft_relation_citations", "record_citations", "relation_citations"):
-        op.execute(f"DROP TRIGGER {table}_project_integrity ON {table}")
-        op.execute(f"DROP TRIGGER {table}_owner_citation_integrity ON {table}")
+        op.execute(f"DROP TRIGGER IF EXISTS {table}_project_integrity ON {table}")
+        op.execute(f"DROP TRIGGER IF EXISTS {table}_owner_citation_integrity ON {table}")
     for table in ("draft_candidates", "draft_relations", "record_versions", "relations", "supersessions"):
-        op.execute(f"DROP TRIGGER {table}_integrity ON {table}")
+        op.execute(f"DROP TRIGGER IF EXISTS {table}_integrity ON {table}")
+    for table in ("draft_sets", "draft_candidates", "records"):
+        op.execute(f"DROP TRIGGER IF EXISTS {table}_identity_immutable ON {table}")
+    op.execute("""
+        DO $$ BEGIN
+          IF to_regclass('graph_entities') IS NOT NULL THEN
+            DROP TRIGGER IF EXISTS graph_entities_identity_immutable ON graph_entities;
+          END IF;
+        END $$
+    """)
     op.execute("DROP FUNCTION validate_knowledge_owner()")
     op.execute("DROP FUNCTION validate_knowledge_citation()")
     op.execute("DROP FUNCTION validate_knowledge_citation_presence()")
+    op.execute("DROP FUNCTION IF EXISTS prevent_knowledge_identity_mutation()")
     for table in ("supersessions", "relation_citations", "relations", "record_citations", "record_versions", "records", "reviews", "draft_relation_citations", "draft_relations", "candidate_citations", "draft_candidates", "draft_sets"):
         op.drop_table(table)
+    op.execute("DROP TABLE IF EXISTS graph_entities")

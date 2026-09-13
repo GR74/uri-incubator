@@ -30,19 +30,30 @@ class CandidateType(StrEnum):
 
 
 class RelationType(StrEnum):
-    SUPPORTS = "supports"
-    CONTRADICTS = "contradicts"
-    DERIVED_FROM = "derived_from"
+    PROPOSES = "proposes"
+    ACCEPTS = "accepts"
+    REJECTS = "rejects"
+    EXPLAINS = "explains"
+    IMPLEMENTS = "implements"
+    TESTS = "tests"
     USES = "uses"
     PRODUCES = "produces"
-    BLOCKS = "blocks"
+    SUPPORTS = "supports"
+    CHALLENGES = "challenges"
+    SUMMARIZES = "summarizes"
+    CITES = "cites"
+    DEFINES = "defines"
+    DEVIATES_FROM = "deviates_from"
+    ASSIGNED_TO = "assigned_to"
+    REVIEWED_BY = "reviewed_by"
     SUPERSEDES = "supersedes"
-    RELATED_TO = "related_to"
+    BELONGS_TO = "belongs_to"
+    CONTINUED_FROM = "continued_from"
 
 
 class DraftStatus(StrEnum):
     DRAFT = "draft"
-    SUBMITTED = "submitted"
+    PENDING_REVIEW = "pending_review"
     CHANGES_REQUESTED = "changes_requested"
     APPROVED = "approved"
     PUBLISHED = "published"
@@ -51,6 +62,15 @@ class DraftStatus(StrEnum):
 class ReviewDecision(StrEnum):
     APPROVE = "approve"
     REQUEST_CHANGES = "request_changes"
+
+
+class GraphEntityType(StrEnum):
+    PROJECT = "project"
+    RECORD = "record"
+    SOURCE = "source"
+    ARTIFACT = "artifact"
+    RESEARCH_ITEM = "research_item"
+    PERSON = "person"
 
 
 def _enum_values(enum_class: type[StrEnum]) -> list[str]:
@@ -68,6 +88,17 @@ class DraftSet(Base):
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), onupdate=sa.func.now())
     candidates: Mapped[list[DraftCandidate]] = relationship(back_populates="draft_set")
+
+
+class GraphEntity(Base):
+    __tablename__ = "graph_entities"
+    __table_args__ = (sa.UniqueConstraint("project_id", "entity_type", "native_id", name="uq_graph_entity_native"),)
+
+    id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(sa.ForeignKey("projects.id"), nullable=False)
+    entity_type: Mapped[GraphEntityType] = mapped_column(sa.Enum(GraphEntityType, native_enum=False, create_constraint=True, values_callable=_enum_values), nullable=False)
+    native_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
 class DraftCandidate(Base):
@@ -125,6 +156,7 @@ class DraftRelationCitation(Base):
     draft_relation_id: Mapped[UUID] = mapped_column(sa.ForeignKey("draft_relations.id", ondelete="CASCADE"), nullable=False)
     content_part_id: Mapped[UUID] = mapped_column(sa.ForeignKey("content_parts.id"), nullable=False)
     quote: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     relation: Mapped[DraftRelation] = relationship(back_populates="citations")
 
 
@@ -175,16 +207,17 @@ class RecordCitation(Base):
     record_version_id: Mapped[UUID] = mapped_column(sa.ForeignKey("record_versions.id"), nullable=False)
     content_part_id: Mapped[UUID] = mapped_column(sa.ForeignKey("content_parts.id"), nullable=False)
     quote: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
 class Relation(Base):
     __tablename__ = "relations"
-    __table_args__ = (sa.CheckConstraint("source_record_id <> target_record_id", name="ck_relation_distinct_endpoints"),)
+    __table_args__ = (sa.CheckConstraint("source_entity_id <> target_entity_id", name="ck_relation_distinct_endpoints"),)
 
     id: Mapped[UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(sa.ForeignKey("projects.id"), nullable=False)
-    source_record_id: Mapped[UUID] = mapped_column(sa.ForeignKey("records.id"), nullable=False)
-    target_record_id: Mapped[UUID] = mapped_column(sa.ForeignKey("records.id"), nullable=False)
+    source_entity_id: Mapped[UUID] = mapped_column(sa.ForeignKey("graph_entities.id"), nullable=False)
+    target_entity_id: Mapped[UUID] = mapped_column(sa.ForeignKey("graph_entities.id"), nullable=False)
     relation_type: Mapped[RelationType] = mapped_column(sa.Enum(RelationType, native_enum=False, create_constraint=True, values_callable=_enum_values), nullable=False)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
@@ -197,6 +230,7 @@ class RelationCitation(Base):
     relation_id: Mapped[UUID] = mapped_column(sa.ForeignKey("relations.id"), nullable=False)
     content_part_id: Mapped[UUID] = mapped_column(sa.ForeignKey("content_parts.id"), nullable=False)
     quote: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
 
 
 class Supersession(Base):
@@ -213,6 +247,6 @@ def _reject_published_mutation(*_: object) -> None:
     raise ImmutableRecordError("Published record versions and citations are immutable.")
 
 
-for _model in (RecordVersion, RecordCitation, Relation, RelationCitation, Supersession):
+for _model in (GraphEntity, Record, RecordVersion, RecordCitation, Relation, RelationCitation, Review, Supersession):
     event.listen(_model, "before_update", _reject_published_mutation)
     event.listen(_model, "before_delete", _reject_published_mutation)

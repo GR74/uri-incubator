@@ -13,11 +13,20 @@ from uri_backend.knowledge.models import (
     DraftRelation,
     DraftRelationCitation,
     DraftSet,
+    GraphEntity,
     Record,
     RecordCitation,
     RecordVersion,
     Relation,
+    RelationCitation,
+    Review,
     Supersession,
+)
+from uri_backend.knowledge.schemas import (
+    CandidateCitationInput,
+    ExtractedCandidate,
+    ExtractedRelation,
+    RelationEndpointReference,
 )
 from uri_backend.projects.models import Project, User
 from uri_backend.sources.models import Artifact, ContentPart, Source, SourceVersion
@@ -208,11 +217,11 @@ async def test_published_relation_requires_citation_and_valid_record_targets(
 ) -> None:
     """A relation must join distinct records in its project and retain exact evidence."""
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
-        first = Record(project_id=source_version.project_id, record_type="result")
-        second = Record(project_id=source_version.project_id, record_type="method")
+        first = GraphEntity(project_id=source_version.project_id, entity_type="record", native_id=uuid4())
+        second = GraphEntity(project_id=source_version.project_id, entity_type="record", native_id=uuid4())
         session.add_all([first, second])
         await session.flush()
-        relation = Relation(project_id=source_version.project_id, source_record_id=first.id, target_record_id=second.id, relation_type="supports")
+        relation = Relation(project_id=source_version.project_id, source_entity_id=first.id, target_entity_id=second.id, relation_type="supports")
         session.add(relation)
         with pytest.raises(sa.exc.DBAPIError, match="citation"):
             await session.commit()
@@ -238,3 +247,68 @@ async def test_supersession_links_later_version_of_same_record(
         ])
         session.add(Supersession(predecessor_version_id=first.id, successor_version_id=second.id))
         await session.commit()
+
+
+def test_extraction_contract_resolves_batch_and_published_relation_endpoints() -> None:
+    """Removing a batch key or allowing ambiguous endpoints would make Task 3 unresolvable."""
+    candidate = ExtractedCandidate(
+        candidate_key="candidate-a",
+        candidate_type="result",
+        statement="Result.",
+        confidence=0.7,
+        citations=[CandidateCitationInput(part_id=uuid4(), quote="Result.")],
+    )
+    assert candidate.candidate_key == "candidate-a"
+    assert candidate.citations[0].part_id
+    assert CandidateCitationInput(content_part_id=uuid4(), quote="Alias.").part_id
+    relation = ExtractedRelation(
+        source=RelationEndpointReference(candidate_key="candidate-a"),
+        target=RelationEndpointReference(record_id=uuid4()),
+        relation_type="supports",
+        citations=[CandidateCitationInput(part_id=uuid4(), quote="Result.")],
+    )
+    assert relation.source.candidate_key == "candidate-a"
+    with pytest.raises(ValueError):
+        RelationEndpointReference(candidate_key="candidate-a", record_id=uuid4())
+
+
+async def test_graph_relation_allows_typed_entities_and_only_continued_from_cross_project(
+    db_engine: AsyncEngine, source_version: SourceVersion
+) -> None:
+    """Changing graph endpoints back to records-only would block approved graph edges."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        other = Project(name="Continuation project")
+        session.add(other)
+        await session.flush()
+        source_entity = GraphEntity(project_id=source_version.project_id, entity_type="project", native_id=source_version.project_id)
+        target_entity = GraphEntity(project_id=other.id, entity_type="project", native_id=other.id)
+        session.add_all([source_entity, target_entity])
+        await session.flush()
+        part_id = await session.scalar(sa.select(ContentPart.id))
+        assert part_id is not None
+        relation = Relation(project_id=source_version.project_id, source_entity_id=source_entity.id, target_entity_id=target_entity.id, relation_type="continued_from")
+        session.add(relation)
+        await session.flush()
+        session.add(RelationCitation(relation_id=relation.id, content_part_id=part_id, quote="The analysis produced a difference."))
+        await session.commit()
+
+
+async def test_database_rejects_published_identity_and_review_mutation(
+    db_engine: AsyncEngine, source_version: SourceVersion
+) -> None:
+    """Direct SQL must not rewrite published identity or reviewer audit history."""
+    async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
+        other = Project(name="Other immutable project")
+        record = Record(project_id=source_version.project_id, record_type="result")
+        draft_set = DraftSet(project_id=source_version.project_id, author_id=source_version.created_by)
+        session.add_all([other, record, draft_set])
+        await session.flush()
+        review = Review(draft_set_id=draft_set.id, draft_version=1, reviewer_id=source_version.created_by, decision="approve")
+        session.add(review)
+        await session.commit()
+        review_id = review.id
+        with pytest.raises(sa.exc.DBAPIError, match="immutable"):
+            await session.execute(sa.update(Record).where(Record.id == record.id).values(project_id=other.id))
+        await session.rollback()
+        with pytest.raises(sa.exc.DBAPIError, match="immutable"):
+            await session.execute(sa.delete(Review).where(Review.id == review_id))
