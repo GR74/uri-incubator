@@ -247,6 +247,6 @@ def _reject_published_mutation(*_: object) -> None:
     raise ImmutableRecordError("Published record versions and citations are immutable.")
 
 
-for _model in (GraphEntity, Record, RecordVersion, RecordCitation, Relation, RelationCitation, Review, Supersession):
+for _model in (CandidateCitation, DraftRelationCitation, GraphEntity, Record, RecordVersion, RecordCitation, Relation, RelationCitation, Review, Supersession):
     event.listen(_model, "before_update", _reject_published_mutation)
     event.listen(_model, "before_delete", _reject_published_mutation)

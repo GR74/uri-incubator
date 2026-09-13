@@ -219,8 +219,12 @@ async def test_published_relation_requires_citation_and_valid_record_targets(
 ) -> None:
     """A relation must join distinct records in its project and retain exact evidence."""
     async with async_sessionmaker(db_engine, expire_on_commit=False)() as session:
-        first = GraphEntity(project_id=source_version.project_id, entity_type="record", native_id=uuid4())
-        second = GraphEntity(project_id=source_version.project_id, entity_type="record", native_id=uuid4())
+        first_record = Record(project_id=source_version.project_id, record_type="result")
+        second_record = Record(project_id=source_version.project_id, record_type="method")
+        session.add_all([first_record, second_record])
+        await session.flush()
+        first = GraphEntity(project_id=source_version.project_id, entity_type="record", native_id=first_record.id)
+        second = GraphEntity(project_id=source_version.project_id, entity_type="record", native_id=second_record.id)
         session.add_all([first, second])
         await session.flush()
         relation = Relation(project_id=source_version.project_id, source_entity_id=first.id, target_entity_id=second.id, relation_type="supports")

@@ -251,17 +251,30 @@ def upgrade() -> None:
     """)
     for table in ("candidate_citations", "draft_relation_citations", "record_citations", "relation_citations"):
         op.execute(f"CREATE CONSTRAINT TRIGGER {table}_owner_citation_integrity AFTER INSERT OR UPDATE OR DELETE ON {table} DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION validate_knowledge_citation_presence()")
+    op.execute("""CREATE FUNCTION validate_graph_entity() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.entity_type = 'project' AND (NEW.native_id <> NEW.project_id OR NOT EXISTS (SELECT 1 FROM projects WHERE id = NEW.native_id)) THEN RAISE EXCEPTION 'project graph entity must name its project'; END IF;
+      IF NEW.entity_type = 'record' AND NOT EXISTS (SELECT 1 FROM records WHERE id = NEW.native_id AND project_id = NEW.project_id) THEN RAISE EXCEPTION 'record graph entity project mismatch'; END IF;
+      IF NEW.entity_type = 'source' AND NOT EXISTS (SELECT 1 FROM sources WHERE id = NEW.native_id AND project_id = NEW.project_id) THEN RAISE EXCEPTION 'source graph entity project mismatch'; END IF;
+      IF NEW.entity_type = 'artifact' AND NOT EXISTS (SELECT 1 FROM source_versions WHERE artifact_id = NEW.native_id AND project_id = NEW.project_id) THEN RAISE EXCEPTION 'artifact graph entity project mismatch'; END IF;
+      IF NEW.entity_type = 'person' AND NOT EXISTS (SELECT 1 FROM project_memberships WHERE user_id = NEW.native_id AND project_id = NEW.project_id AND is_active) THEN RAISE EXCEPTION 'person graph entity requires active membership'; END IF;
+      IF NEW.entity_type = 'research_item' THEN RAISE EXCEPTION 'research_item graph entities are reserved'; END IF; RETURN NULL; END; $$""")
+    op.execute("CREATE CONSTRAINT TRIGGER graph_entities_native_integrity AFTER INSERT OR UPDATE ON graph_entities DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION validate_graph_entity()")
+    op.execute("CREATE FUNCTION prevent_candidate_citation_reparent() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.candidate_id <> OLD.candidate_id THEN RAISE EXCEPTION 'candidate citation owner is immutable'; END IF; RETURN NEW; END; $$")
+    op.execute("CREATE TRIGGER candidate_citations_owner_immutable BEFORE UPDATE ON candidate_citations FOR EACH ROW EXECUTE FUNCTION prevent_candidate_citation_reparent()")
+    op.execute("CREATE FUNCTION prevent_draft_relation_citation_reparent() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.draft_relation_id <> OLD.draft_relation_id THEN RAISE EXCEPTION 'draft relation citation owner is immutable'; END IF; RETURN NEW; END; $$")
+    op.execute("CREATE TRIGGER draft_relation_citations_owner_immutable BEFORE UPDATE ON draft_relation_citations FOR EACH ROW EXECUTE FUNCTION prevent_draft_relation_citation_reparent()")
     op.execute("""
         CREATE FUNCTION prevent_knowledge_identity_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
           IF TG_TABLE_NAME = 'draft_sets' AND NEW.project_id <> OLD.project_id THEN RAISE EXCEPTION 'draft set project identity is immutable'; END IF;
           IF TG_TABLE_NAME = 'draft_candidates' AND NEW.draft_set_id <> OLD.draft_set_id THEN RAISE EXCEPTION 'draft candidate set identity is immutable'; END IF;
+          IF TG_TABLE_NAME = 'draft_relations' AND NEW.draft_set_id <> OLD.draft_set_id THEN RAISE EXCEPTION 'draft relation set identity is immutable'; END IF;
           IF TG_TABLE_NAME = 'records' AND (NEW.project_id <> OLD.project_id OR NEW.record_type <> OLD.record_type) THEN RAISE EXCEPTION 'record identity is immutable'; END IF;
           IF TG_TABLE_NAME = 'graph_entities' AND (NEW.project_id <> OLD.project_id OR NEW.entity_type <> OLD.entity_type OR NEW.native_id <> OLD.native_id) THEN RAISE EXCEPTION 'graph entity identity is immutable'; END IF;
           RETURN NEW;
         END; $$
     """)
-    for table in ("draft_sets", "draft_candidates", "records", "graph_entities"):
+    for table in ("draft_sets", "draft_candidates", "draft_relations", "records", "graph_entities"):
         op.execute(f"CREATE TRIGGER {table}_identity_immutable BEFORE UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION prevent_knowledge_identity_mutation()")
     _immutable("reviews")
     _immutable("records")
@@ -277,12 +290,20 @@ def downgrade() -> None:
     for table in ("supersessions", "relation_citations", "relations", "record_citations", "record_versions", "records", "reviews"):
         op.execute(f"DROP TRIGGER IF EXISTS {table}_append_only ON {table}")
         op.execute(f"DROP FUNCTION IF EXISTS prevent_{table}_mutation()")
+    op.execute("DROP TRIGGER IF EXISTS graph_entities_append_only ON graph_entities")
+    op.execute("DROP FUNCTION IF EXISTS prevent_graph_entities_mutation()")
     for table in ("candidate_citations", "draft_relation_citations", "record_citations", "relation_citations"):
         op.execute(f"DROP TRIGGER IF EXISTS {table}_project_integrity ON {table}")
         op.execute(f"DROP TRIGGER IF EXISTS {table}_owner_citation_integrity ON {table}")
+    op.execute("DROP TRIGGER IF EXISTS candidate_citations_owner_immutable ON candidate_citations")
+    op.execute("DROP TRIGGER IF EXISTS draft_relation_citations_owner_immutable ON draft_relation_citations")
+    op.execute("DROP FUNCTION IF EXISTS prevent_candidate_citation_reparent()")
+    op.execute("DROP FUNCTION IF EXISTS prevent_draft_relation_citation_reparent()")
+    op.execute("DROP TRIGGER IF EXISTS graph_entities_native_integrity ON graph_entities")
+    op.execute("DROP FUNCTION IF EXISTS validate_graph_entity()")
     for table in ("draft_candidates", "draft_relations", "record_versions", "relations", "supersessions"):
         op.execute(f"DROP TRIGGER IF EXISTS {table}_integrity ON {table}")
-    for table in ("draft_sets", "draft_candidates", "records"):
+    for table in ("draft_sets", "draft_candidates", "draft_relations", "records"):
         op.execute(f"DROP TRIGGER IF EXISTS {table}_identity_immutable ON {table}")
     op.execute("""
         DO $$ BEGIN
