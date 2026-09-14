@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LOCAL_ROOT = Path(__file__).resolve().parents[1] / ".local"
+MODEL_DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
 class Settings(BaseSettings):
@@ -49,5 +51,10 @@ class Settings(BaseSettings):
             if missing:
                 raise ValueError(
                     "local AI requires explicit " + ", ".join(missing)
+                )
+            assert self.generation_model_digest is not None
+            if MODEL_DIGEST_PATTERN.fullmatch(self.generation_model_digest) is None:
+                raise ValueError(
+                    "generation_model_digest must be canonical sha256:<64 lowercase hex>"
                 )
         return self

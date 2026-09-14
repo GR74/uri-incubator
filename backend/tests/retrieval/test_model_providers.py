@@ -18,6 +18,7 @@ from uri_backend.retrieval.ollama import OllamaProvider
 from uri_backend.retrieval.providers import (
     EmbeddingBatchError,
     EmbeddingDimensionError,
+    GenerationSpec,
     ProviderConnectionError,
     ProviderSchemaError,
     ProviderTimeoutError,
@@ -32,6 +33,9 @@ class CandidateBatch(BaseModel):
     items: list[str]
 
 
+TEST_DIGEST = "sha256:" + "a" * 64
+
+
 def provider_with_response(response: httpx.Response | Exception) -> OllamaProvider:
     async def handler(request: httpx.Request) -> httpx.Response:
         if isinstance(response, Exception):
@@ -44,6 +48,7 @@ def provider_with_response(response: httpx.Response | Exception) -> OllamaProvid
         embedding_model="pilot-embed",
         timeout=30,
         expected_embedding_dimension=2,
+        generation_model_digest=TEST_DIGEST,
         transport=httpx.MockTransport(handler),
     )
 
@@ -61,6 +66,7 @@ async def test_ollama_structured_generation_sends_exact_json_schema() -> None:
         embedding_model="pilot-embed",
         timeout=30,
         expected_embedding_dimension=2,
+        generation_model_digest=TEST_DIGEST,
         transport=httpx.MockTransport(handler),
     )
 
@@ -82,6 +88,9 @@ async def test_ollama_structured_generation_sends_exact_json_schema() -> None:
         "model": "pilot-model",
         "done": True,
     }
+    assert provider.generation_spec.model_digest == TEST_DIGEST
+    assert provider.last_generation_metadata is not None
+    assert provider.last_generation_metadata.sampling_config == {"temperature": 0}
 
 
 async def test_embedding_dimension_mismatch_is_rejected() -> None:
@@ -173,7 +182,7 @@ def test_settings_provider_factory_constructs_ollama_when_enabled() -> None:
         Settings(
             local_ai_enabled=True,
             generation_model="pilot-model",
-            generation_model_digest="sha256:pilot",
+            generation_model_digest=TEST_DIGEST,
             embedding_model="pilot-embed",
             expected_embedding_dimension=384,
         )
@@ -189,7 +198,7 @@ def test_enabled_local_ai_requires_explicit_models_and_dimension() -> None:
     settings = Settings(
         local_ai_enabled=True,
         generation_model="pilot-model",
-        generation_model_digest="sha256:pilot",
+        generation_model_digest=TEST_DIGEST,
         embedding_model="pilot-embed",
         expected_embedding_dimension=384,
     )
@@ -198,7 +207,7 @@ def test_enabled_local_ai_requires_explicit_models_and_dimension() -> None:
         Settings(
             local_ai_enabled=True,
             generation_model="   ",
-            generation_model_digest="sha256:pilot",
+            generation_model_digest=TEST_DIGEST,
             embedding_model="pilot-embed",
             expected_embedding_dimension=384,
         )
@@ -231,6 +240,7 @@ async def test_ollama_embeddings_preserve_order_and_normalize_finite_numbers() -
 
     provider = OllamaProvider(
         "http://127.0.0.1:11434", "pilot-model", "pilot-embed", 30, 2,
+        generation_model_digest=TEST_DIGEST,
         transport=httpx.MockTransport(handler),
     )
     result = await provider.embed(("first", "second"))
@@ -252,6 +262,7 @@ async def test_response_metadata_is_task_local_for_shared_provider() -> None:
 
     provider = OllamaProvider(
         "http://127.0.0.1:11434", "pilot-model", "pilot-embed", 30, 2,
+        generation_model_digest=TEST_DIGEST,
         transport=httpx.MockTransport(handler),
     )
 
@@ -260,3 +271,23 @@ async def test_response_metadata_is_task_local_for_shared_provider() -> None:
         return provider.response_metadata["done"]  # type: ignore[index,return-value]
 
     assert await asyncio.gather(call("complete"), call("incomplete")) == [True, False]
+
+
+def test_enabled_local_ai_rejects_noncanonical_generation_digest() -> None:
+    with pytest.raises(ValueError, match="canonical sha256"):
+        Settings(
+            local_ai_enabled=True,
+            generation_model="pilot-model",
+            generation_model_digest="sha256:pilot",
+            embedding_model="pilot-embed",
+            expected_embedding_dimension=384,
+        )
+
+
+def test_generation_spec_freezes_effective_sampling_configuration() -> None:
+    spec = GenerationSpec(
+        "test-provider", "test-model", TEST_DIGEST, {"temperature": 0}, "test-v1"
+    )
+
+    with pytest.raises(TypeError):
+        spec.sampling_config["temperature"] = 1  # type: ignore[index]

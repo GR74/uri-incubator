@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass
 from hashlib import sha256
 from uuid import UUID
 
@@ -26,7 +27,10 @@ from uri_backend.knowledge.schemas import (
     ExtractedRelation,
 )
 from uri_backend.retrieval.providers import (
+    GenerationCallMetadata,
+    GenerationSpec,
     ProviderError,
+    ProviderSchemaError,
     StructuredGenerationProvider,
     StructuredRequest,
 )
@@ -38,13 +42,9 @@ SAFE_RESPONSE_KEYS = frozenset({"status_code", "model", "done", "eval_count", "p
 
 @dataclass(frozen=True)
 class ExtractionConfig:
-    model_id: str
-    model_digest: str
     prompt_version: str
     schema_version: str
     parser_version: str
-    sampling_config: dict[str, object] = field(default_factory=dict)
-    sampling_version: str = "sampling-v1"
     max_window_characters: int = 6000
     pipeline_version: str = EXTRACTION_PIPELINE_VERSION
 
@@ -67,15 +67,51 @@ def _candidate_ref(ordinal: int, key: str) -> dict[str, object]:
     return {"candidate_ordinal": ordinal, "candidate_digest": sha256(key.encode()).hexdigest()[:16]}
 
 
-def _safe_response_metadata(provider: object) -> dict[str, object]:
-    metadata = getattr(provider, "response_metadata", {})
-    if not isinstance(metadata, dict):
+def _safe_response_metadata(metadata: object) -> dict[str, object]:
+    if not isinstance(metadata, Mapping):
         return {}
     return {
         key: value
         for key, value in metadata.items()
-        if key in SAFE_RESPONSE_KEYS and isinstance(value, (str, int, float, bool))
+        if key in SAFE_RESPONSE_KEYS
+        and isinstance(value, (str, int, float, bool))
+        and (not isinstance(value, str) or len(value) <= 300)
     }
+
+
+def _provider_generation_spec(provider: StructuredGenerationProvider) -> GenerationSpec:
+    spec = provider.generation_spec
+    if not isinstance(spec, GenerationSpec):
+        raise ProviderSchemaError("provider_generation_spec_invalid")
+    return spec
+
+
+def _provider_call_entry(
+    provider: StructuredGenerationProvider, window_index: int
+) -> tuple[GenerationCallMetadata, dict[str, object]]:
+    metadata = provider.last_generation_metadata
+    if not isinstance(metadata, GenerationCallMetadata):
+        raise ProviderSchemaError("provider_metadata_missing")
+    entry = {
+        "window_index": window_index,
+        "provider_id": metadata.provider_id,
+        "model_id": metadata.model_id,
+        "model_digest": metadata.model_digest,
+        "sampling_config": dict(metadata.sampling_config),
+        "sampling_version": metadata.sampling_version,
+        "response_metadata": _safe_response_metadata(metadata.response_metadata),
+    }
+    return metadata, entry
+
+
+def _metadata_matches_spec(metadata: GenerationCallMetadata, spec: GenerationSpec) -> bool:
+    return (
+        metadata.provider_id == spec.provider_id
+        and metadata.model_id == spec.model_id
+        and metadata.model_digest == spec.model_digest
+        and metadata.sampling_config == spec.sampling_config
+        and metadata.sampling_version == spec.sampling_version
+    )
 
 
 def _windows(parts: list[ContentPart], limit: int) -> list[dict[str, object]]:
@@ -108,6 +144,7 @@ async def _get_or_create_run(
     session: AsyncSession,
     source_version_id: UUID,
     config: ExtractionConfig,
+    generation_spec: GenerationSpec,
     ingestion_run_id: UUID | None,
     job_id: UUID | None = None,
     attempt: int | None = None,
@@ -127,20 +164,19 @@ async def _get_or_create_run(
             attempt=attempt,
             worker_id=worker_id,
             pipeline_version=config.pipeline_version,
-            model_id=config.model_id,
-            model_digest=config.model_digest,
+            provider_id=generation_spec.provider_id,
+            model_id=generation_spec.model_id,
+            model_digest=generation_spec.model_digest,
             prompt_version=config.prompt_version,
             schema_version=config.schema_version,
             parser_version=config.parser_version,
-            sampling_config=config.sampling_config,
-            sampling_version=config.sampling_version,
+            sampling_config=dict(generation_spec.sampling_config),
+            sampling_version=generation_spec.sampling_version,
             status="running",
         )
         session.add(run)
         await session.flush()
     else:
-        if ingestion_run_id is not None and run.ingestion_run_id is None:
-            run.ingestion_run_id = ingestion_run_id
         run.status = "running"
         run.error_code, run.error_detail = None, None
     return run
@@ -150,13 +186,15 @@ async def _record_provider_failure(
     session: AsyncSession,
     source_version_id: UUID,
     config: ExtractionConfig,
+    generation_spec: GenerationSpec,
     ingestion_run_id: UUID | None,
     error: Exception,
     claimed_job: object | None = None,
+    call_metadata: list[dict[str, object]] | None = None,
 ) -> None:
     async with session.begin():
         run = await _get_or_create_run(
-            session, source_version_id, config, ingestion_run_id,
+            session, source_version_id, config, generation_spec, ingestion_run_id,
             getattr(claimed_job, "id", None), getattr(claimed_job, "attempt", None), getattr(claimed_job, "worker_id", None),
         )
         if isinstance(error, ProviderError):
@@ -165,6 +203,10 @@ async def _record_provider_failure(
         else:
             run.status, run.error_code, run.error_detail = "failed", "internal_error", "Extraction failed"
         run.completed_at = sa.func.now() if run.status == "failed" else None
+        run.call_metadata = call_metadata or []
+        run.response_metadata = (
+            call_metadata[-1]["response_metadata"] if call_metadata else {}
+        )
 
 
 def _validated_citations(
@@ -191,8 +233,16 @@ def _date_is_supported(candidate: ExtractedCandidate, citations: list[CandidateC
 
 def _actors_are_supported(candidate: ExtractedCandidate, citations: list[CandidateCitationInput], parts: dict[UUID, ContentPart]) -> bool:
     labels = {parts[citation.part_id].author_label.casefold() for citation in citations if parts[citation.part_id].author_label}
-    tokens = set(re.findall(r"\b[\w'-]+\b", " ".join(parts[citation.part_id].text for citation in citations).casefold()))
-    return all(actor.casefold() in labels or set(re.findall(r"\b[\w'-]+\b", actor.casefold())) <= tokens for actor in candidate.actors)
+    prose = " ".join(parts[citation.part_id].text for citation in citations).casefold()
+
+    def appears_as_phrase(actor: str) -> bool:
+        tokens = re.findall(r"[\w'-]+", actor.casefold())
+        if not tokens:
+            return False
+        phrase = r"[\W_]+".join(re.escape(token) for token in tokens)
+        return re.search(rf"(?<![\w'-]){phrase}(?![\w'-])", prose) is not None
+
+    return all(actor.casefold() in labels or appears_as_phrase(actor) for actor in candidate.actors)
 
 
 def _contradicts(left: str, right: str) -> bool:
@@ -226,6 +276,7 @@ async def extract_candidates(
     )).all())
     part_by_id = {part.id: part for part in parts}
     project_id, author_id = source_version.project_id, source_version.created_by
+    generation_spec = _provider_generation_spec(provider)
     await session.commit()
 
     async with session.begin():
@@ -244,12 +295,13 @@ async def extract_candidates(
             )
             return existing
         await _get_or_create_run(
-            session, source_version_id, extraction_config, ingestion_run_id,
+            session, source_version_id, extraction_config, generation_spec, ingestion_run_id,
             getattr(claimed_job, "id", None), getattr(claimed_job, "attempt", None), getattr(claimed_job, "worker_id", None),
         )
     try:
         merged_items: list[ExtractedCandidate] = []
         merged_relations: list[ExtractedRelation] = []
+        call_metadata: list[dict[str, object]] = []
         for window_index, window in enumerate(_windows(parts, extraction_config.max_window_characters)):
             request = StructuredRequest(
                 schema=CandidateBatch,
@@ -259,6 +311,10 @@ async def extract_candidates(
                 ],
             )
             response = await provider.generate(request)
+            metadata, entry = _provider_call_entry(provider, window_index)
+            call_metadata.append(entry)
+            if not _metadata_matches_spec(metadata, generation_spec):
+                raise ProviderSchemaError("provider_metadata_mismatch")
             prefix = f"w{window_index}:"
             merged_items.extend(item.model_copy(update={"candidate_key": prefix + item.candidate_key}) for item in response.items)
             for relation in response.relations:
@@ -267,7 +323,16 @@ async def extract_candidates(
                 merged_relations.append(relation.model_copy(update={"source": source, "target": target}))
         batch = CandidateBatch(items=merged_items, relations=merged_relations)
     except Exception as error:
-        await _record_provider_failure(session, source_version_id, extraction_config, ingestion_run_id, error, claimed_job)
+        await _record_provider_failure(
+            session,
+            source_version_id,
+            extraction_config,
+            generation_spec,
+            ingestion_run_id,
+            error,
+            claimed_job,
+            call_metadata if "call_metadata" in locals() else None,
+        )
         raise
 
     warnings: list[dict[str, object]] = []
@@ -318,7 +383,7 @@ async def extract_candidates(
 
             await owned_claim(session, claimed_job)
         run = await _get_or_create_run(
-            session, source_version_id, extraction_config, ingestion_run_id,
+            session, source_version_id, extraction_config, generation_spec, ingestion_run_id,
             getattr(claimed_job, "id", None), getattr(claimed_job, "attempt", None), getattr(claimed_job, "worker_id", None),
         )
         draft = DraftSet(project_id=project_id, author_id=author_id, extraction_run_id=run.id, candidates=[])
@@ -380,7 +445,9 @@ async def extract_candidates(
             session.add(persisted_relation)
             await session.flush()
             session.add_all([DraftRelationCitation(draft_relation_id=persisted_relation.id, content_part_id=item.part_id, quote=_normalized(item.quote)) for item in citations])
-        run.status, run.warnings, run.response_metadata = "succeeded", warnings, _safe_response_metadata(provider)
+        run.status, run.warnings = "succeeded", warnings
+        run.call_metadata = call_metadata
+        run.response_metadata = call_metadata[-1]["response_metadata"] if call_metadata else {}
         run.completed_at = sa.func.now()
         await session.flush()
         return draft

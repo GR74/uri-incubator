@@ -9,6 +9,9 @@ from pydantic import BaseModel, ValidationError
 from uri_backend.retrieval.providers import (
     EmbeddingBatchError,
     EmbeddingDimensionError,
+    GenerationCallMetadata,
+    GenerationSpec,
+    ProviderError,
     ProviderUnavailableError,
     StructuredRequest,
 )
@@ -45,19 +48,47 @@ class FakeProviderConfigurationError(RuntimeError):
 
 
 class FakeStructuredProvider:
-    def __init__(self, result: BaseModel | None = None, unavailable: bool = False) -> None:
+    def __init__(
+        self,
+        result: BaseModel | None = None,
+        unavailable: bool = False,
+        generation_spec: GenerationSpec | None = None,
+        call_specs: list[GenerationSpec] | None = None,
+        provider_error: ProviderError | None = None,
+    ) -> None:
         self.result = result
         self.is_unavailable = unavailable
         self.requests: list[StructuredRequest[BaseModel]] = []
+        self._generation_spec = generation_spec or GenerationSpec(
+            "fake-structured", "fake-structured-model", "sha256:" + "f" * 64,
+            {"temperature": 0}, "fake-sampling-v1",
+        )
+        self.call_specs = call_specs or []
+        self.provider_error = provider_error
+        self._last_generation_metadata: GenerationCallMetadata | None = None
 
     @classmethod
     def unavailable(cls) -> FakeStructuredProvider:
         return cls(unavailable=True)
 
+    @property
+    def generation_spec(self) -> GenerationSpec:
+        return self._generation_spec
+
+    @property
+    def last_generation_metadata(self) -> GenerationCallMetadata | None:
+        return self._last_generation_metadata
+
     async def generate(self, request: StructuredRequest[ModelT]) -> ModelT:
         self.requests.append(request)
+        active_spec = self.call_specs[len(self.requests) - 1] if len(self.requests) <= len(self.call_specs) else self._generation_spec
+        self._last_generation_metadata = GenerationCallMetadata.from_spec(
+            active_spec, {"status_code": 200}
+        )
         if self.is_unavailable:
             raise ProviderUnavailableError()
+        if self.provider_error is not None:
+            raise self.provider_error
         if self.result is None:
             raise FakeProviderConfigurationError(
                 "FakeStructuredProvider requires an explicit result."

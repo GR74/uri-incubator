@@ -71,6 +71,7 @@ class ExtractionRun(Base):
     attempt: Mapped[int | None] = mapped_column(sa.Integer)
     worker_id: Mapped[str | None] = mapped_column(sa.String(200))
     pipeline_version: Mapped[str] = mapped_column(sa.String(100), nullable=False)
+    provider_id: Mapped[str] = mapped_column(sa.String(100), nullable=False)
     model_id: Mapped[str] = mapped_column(sa.String(300), nullable=False)
     model_digest: Mapped[str] = mapped_column(sa.String(300), nullable=False)
     prompt_version: Mapped[str] = mapped_column(sa.String(100), nullable=False)
@@ -78,6 +79,7 @@ class ExtractionRun(Base):
     parser_version: Mapped[str] = mapped_column(sa.String(100), nullable=False)
     sampling_config: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict, server_default=sa.text("'{}'::jsonb"))
     sampling_version: Mapped[str] = mapped_column(sa.String(100), nullable=False)
+    call_metadata: Mapped[list[object]] = mapped_column(JSONB, nullable=False, default=list, server_default=sa.text("'[]'::jsonb"))
     response_metadata: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict, server_default=sa.text("'{}'::jsonb"))
     warnings: Mapped[list[object]] = mapped_column(JSONB, nullable=False, default=list, server_default=sa.text("'[]'::jsonb"))
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False, default="queued", server_default="queued")
@@ -85,3 +87,34 @@ class ExtractionRun(Base):
     error_detail: Mapped[str | None] = mapped_column(sa.String(1000))
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+
+
+class ExtractionProvenanceError(ValueError):
+    """Raised when ORM code tries to rewrite an extraction attempt identity."""
+
+
+_EXTRACTION_PROVENANCE_FIELDS = (
+    "source_version_id",
+    "ingestion_run_id",
+    "job_id",
+    "attempt",
+    "worker_id",
+    "pipeline_version",
+    "provider_id",
+    "model_id",
+    "model_digest",
+    "prompt_version",
+    "schema_version",
+    "parser_version",
+    "sampling_config",
+    "sampling_version",
+)
+
+
+@sa.event.listens_for(ExtractionRun, "before_update")
+def _reject_extraction_provenance_mutation(
+    _mapper: object, _connection: object, target: ExtractionRun
+) -> None:
+    state = sa.inspect(target)
+    if any(state.attrs[name].history.has_changes() for name in _EXTRACTION_PROVENANCE_FIELDS):
+        raise ExtractionProvenanceError("Extraction run provenance is immutable.")

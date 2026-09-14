@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tests.fakes import FakeStructuredProvider
 from uri_backend.ingestion.models import (
+    ExtractionProvenanceError,
     ExtractionRun,
     IngestionJob,
     IngestionJobAttempt,
@@ -26,10 +27,15 @@ from uri_backend.ingestion.queue import (
     enqueue_extraction,
     fail_job,
 )
-from uri_backend.ingestion.worker import build_extraction_handler
+from uri_backend.ingestion.worker import (
+    PipelineDispatcher,
+    build_extraction_handler,
+    run_worker,
+)
 from uri_backend.knowledge.extraction import (
     CandidateBatch,
     ExtractionConfig,
+    _actors_are_supported,
     _contradicts,
     _windows,
     extract_candidates,
@@ -49,17 +55,14 @@ from uri_backend.knowledge.schemas import (
     RelationEndpointReference,
 )
 from uri_backend.projects.models import Project, User
+from uri_backend.retrieval.providers import GenerationSpec, ProviderSchemaError
 from uri_backend.sources.models import Artifact, ContentPart, Source, SourceVersion
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "extraction" / "clearermind_synthetic_parts.json"
 TEST_CONFIG = ExtractionConfig(
-    model_id="synthetic-clearermind-model",
-    model_digest="sha256:synthetic",
     prompt_version="extraction-prompt-v1",
     schema_version="candidate-batch-v1",
     parser_version="normalization-v1",
-    sampling_config={"temperature": 0},
-    sampling_version="sampling-v1",
 )
 
 
@@ -238,6 +241,84 @@ async def test_extraction_calls_provider_once_per_bounded_window(seed_parts) -> 
     assert all(len(request.messages[1]["content"]["parts"][0]["text"]) <= 20 for request in provider.requests)
 
 
+async def test_extraction_persists_provider_declared_metadata_for_each_window(seed_parts) -> None:
+    """Run provenance must reflect the provider's actual identity and every request."""
+    session, version, parts = seed_parts
+    spec = GenerationSpec(
+        provider_id="synthetic-provider",
+        model_id="synthetic-model-v2",
+        model_digest="sha256:" + "a" * 64,
+        sampling_config={"temperature": 0.25},
+        sampling_version="provider-sampling-v2",
+    )
+    provider = FakeStructuredProvider(
+        CandidateBatch(items=[ExtractedCandidate(
+            candidate_key="provider-provenance",
+            candidate_type="decision",
+            statement="Use the revised method.",
+            citations=[CandidateCitationInput(part_id=parts[0].id, quote="Use the revised method.")],
+            confidence=0.9,
+        )]),
+        generation_spec=spec,
+    )
+
+    await extract_candidates(
+        session,
+        version.id,
+        provider,
+        replace(TEST_CONFIG, max_window_characters=20),
+    )
+
+    run = await session.scalar(sa.select(ExtractionRun))
+    assert run is not None
+    assert (run.provider_id, run.model_id, run.model_digest, run.sampling_config, run.sampling_version) == (
+        spec.provider_id,
+        spec.model_id,
+        spec.model_digest,
+        spec.sampling_config,
+        spec.sampling_version,
+    )
+    assert [entry["window_index"] for entry in run.call_metadata] == list(range(len(provider.requests)))
+    assert all(entry["provider_id"] == spec.provider_id and entry["model_digest"] == spec.model_digest for entry in run.call_metadata)
+
+
+async def test_extraction_rejects_mismatched_provider_call_metadata(seed_parts) -> None:
+    """A request whose actual provider identity diverges from the attempt cannot publish."""
+    session, version, _ = seed_parts
+    spec = GenerationSpec("synthetic-provider", "synthetic-model", "sha256:" + "c" * 64, {"temperature": 0}, "provider-sampling-v1")
+    mismatch = GenerationSpec("synthetic-provider", "other-model", "sha256:" + "d" * 64, {"temperature": 0}, "provider-sampling-v1")
+    provider = FakeStructuredProvider(CandidateBatch(), generation_spec=spec, call_specs=[mismatch])
+
+    with pytest.raises(ProviderSchemaError, match="provider_metadata_mismatch"):
+        await extract_candidates(session, version.id, provider, TEST_CONFIG)
+
+    run = await session.scalar(sa.select(ExtractionRun))
+    assert run is not None and run.status == "failed" and run.error_code == "provider_metadata_mismatch"
+    assert await session.scalar(sa.select(sa.func.count()).select_from(DraftSet)) == 0
+
+
+async def test_extraction_run_provenance_is_immutable_in_orm_and_postgres(seed_parts) -> None:
+    """Lifecycle data may change, but a run's call identity cannot be rewritten."""
+    session, version, _ = seed_parts
+    spec = GenerationSpec("synthetic-provider", "synthetic-model", "sha256:" + "e" * 64, {"temperature": 0}, "provider-sampling-v1")
+    await extract_candidates(session, version.id, FakeStructuredProvider(CandidateBatch(), generation_spec=spec), TEST_CONFIG)
+    run = await session.scalar(sa.select(ExtractionRun))
+    assert run is not None
+    run_id = run.id
+
+    run.status, run.error_code, run.response_metadata = "failed", "internal_error", {"status_code": 500}
+    await session.commit()
+    assert run.status == "failed"
+
+    run.model_id = "rewritten"
+    with pytest.raises(ExtractionProvenanceError):
+        await session.commit()
+    await session.rollback()
+    with pytest.raises(sa.exc.DBAPIError, match="extraction run provenance is immutable"):
+        await session.execute(sa.update(ExtractionRun).where(ExtractionRun.id == run_id).values(model_id="rewritten"))
+    await session.rollback()
+
+
 async def test_duplicate_key_alias_preserves_relation(seed_parts) -> None:
     session, version, parts = seed_parts
     citation = CandidateCitationInput(part_id=parts[0].id, quote="Use the revised method.")
@@ -262,6 +343,29 @@ def test_schema_and_conflict_boundaries_reject_blanks_without_substring_guessing
         ExtractedCandidate(candidate_key="x", candidate_type="decision", statement="evidence", actors=[" "], citations=[CandidateCitationInput(part_id=uuid4(), quote="evidence")], confidence=0.5)
     assert _contradicts("Use revised method", "Do not use revised method")
     assert not _contradicts("Use revised method", "Use alternative method")
+
+
+def test_actor_phrase_support_requires_ordered_name_in_cited_prose() -> None:
+    """Scattered name tokens must not be promoted into a cited actor phrase."""
+    part = ContentPart(
+        id=uuid4(),
+        source_version_id=uuid4(),
+        ordinal=1,
+        kind="paragraph",
+        text="Ann reviewed one method. Lee reviewed another method.",
+        locator={"line": 1},
+    )
+    citation = CandidateCitationInput(part_id=part.id, quote="Ann reviewed one method.")
+    candidate = ExtractedCandidate(
+        candidate_key="split-name",
+        candidate_type="decision",
+        statement="The method was reviewed.",
+        actors=["Ann Lee"],
+        citations=[citation],
+        confidence=0.8,
+    )
+
+    assert not _actors_are_supported(candidate, [citation], {part.id: part})
 
 
 async def test_warning_does_not_store_model_key(seed_parts) -> None:
@@ -310,8 +414,8 @@ async def test_attempt_provenance_stays_distinct_and_terminal_failure_stops(db_e
         job.lease_expires_at = sa.func.now() + sa.text("interval '30 seconds'")
         setup.add(IngestionJobAttempt(job_id=job.id, attempt=1, worker_id="test"))
         setup.add_all([
-            ExtractionRun(source_version_id=version.id, ingestion_run_id=run.id, job_id=job.id, attempt=1, worker_id="test", pipeline_version="extraction-v1", model_id="a", model_digest="sha256:a", prompt_version="p1", schema_version="s1", parser_version="n1", sampling_config={"temperature": 0}, sampling_version="v1", status="failed"),
-            ExtractionRun(source_version_id=version.id, ingestion_run_id=run.id, job_id=job.id, attempt=2, worker_id="test", pipeline_version="extraction-v1", model_id="b", model_digest="sha256:b", prompt_version="p2", schema_version="s1", parser_version="n1", sampling_config={"temperature": 0}, sampling_version="v1", status="retry"),
+            ExtractionRun(source_version_id=version.id, ingestion_run_id=run.id, job_id=job.id, attempt=1, worker_id="test", pipeline_version="extraction-v1", provider_id="synthetic", model_id="a", model_digest="sha256:a", prompt_version="p1", schema_version="s1", parser_version="n1", sampling_config={"temperature": 0}, sampling_version="v1", status="failed"),
+            ExtractionRun(source_version_id=version.id, ingestion_run_id=run.id, job_id=job.id, attempt=2, worker_id="test", pipeline_version="extraction-v1", provider_id="synthetic", model_id="b", model_digest="sha256:b", prompt_version="p2", schema_version="s1", parser_version="n1", sampling_config={"temperature": 0}, sampling_version="v1", status="retry"),
         ])
         await setup.flush()
         await fail_job(setup, job.id, "test", "provider_schema_invalid", "Provider extraction failed", terminal=True)
@@ -341,6 +445,42 @@ async def test_retryable_provider_failure_returns_job_to_queue(db_engine, seed_p
     async with factory() as verify:
         job = await verify.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
         assert job is not None and job.status == "queued" and job.attempt == 1
+
+
+async def test_worker_maps_terminal_provider_error_to_terminal_job(db_engine, seed_parts) -> None:
+    """A terminal provider response must stop the queue through the real worker path."""
+    session, version, _ = seed_parts
+    await enqueue_extraction(session, version.id)
+    await session.commit()
+    await session.close()
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    provider = FakeStructuredProvider(
+        CandidateBatch(), provider_error=ProviderSchemaError("provider_schema_invalid")
+    )
+    dispatcher = PipelineDispatcher()
+    dispatcher.register("extraction-v1", build_extraction_handler(factory, provider, TEST_CONFIG))
+    worker = asyncio.create_task(
+        run_worker(factory, dispatcher, worker_id="terminal-provider", poll_seconds=10)
+    )
+    try:
+        for _ in range(40):
+            async with factory() as verify:
+                job = await verify.scalar(sa.select(IngestionJob))
+                if job is not None and job.status == "failed":
+                    break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail("worker did not persist the terminal provider outcome")
+    finally:
+        worker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await worker
+
+    async with factory() as verify:
+        job = await verify.scalar(sa.select(IngestionJob))
+        run = await verify.scalar(sa.select(ExtractionRun))
+        assert job is not None and job.status == "failed" and job.attempt == 1
+        assert run is not None and run.status == "failed" and run.error_code == "provider_schema_invalid"
 
 
 async def test_record_endpoint_relation_is_cleaned_by_0009_downgrade_and_reupgrade(db_engine, seed_parts, test_database_url) -> None:

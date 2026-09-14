@@ -27,6 +27,7 @@ def upgrade() -> None:
         sa.Column("attempt", sa.Integer),
         sa.Column("worker_id", sa.String(200)),
         sa.Column("pipeline_version", sa.String(100), nullable=False),
+        sa.Column("provider_id", sa.String(100), nullable=False),
         sa.Column("model_id", sa.String(300), nullable=False),
         sa.Column("model_digest", sa.String(300), nullable=False),
         sa.Column("prompt_version", sa.String(100), nullable=False),
@@ -34,6 +35,7 @@ def upgrade() -> None:
         sa.Column("parser_version", sa.String(100), nullable=False),
         sa.Column("sampling_config", jsonb, nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("sampling_version", sa.String(100), nullable=False),
+        sa.Column("call_metadata", jsonb, nullable=False, server_default=sa.text("'[]'::jsonb")),
         sa.Column("response_metadata", jsonb, nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("warnings", jsonb, nullable=False, server_default=sa.text("'[]'::jsonb")),
         sa.Column("status", sa.String(32), nullable=False, server_default="queued"),
@@ -44,6 +46,33 @@ def upgrade() -> None:
         sa.CheckConstraint("status IN ('queued', 'running', 'succeeded', 'retry', 'failed')", name="ck_extraction_run_status"),
         sa.UniqueConstraint("job_id", "attempt", name="uq_extraction_run_job_attempt"),
     )
+    op.execute("""
+        CREATE FUNCTION reject_extraction_run_provenance_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.source_version_id IS DISTINCT FROM OLD.source_version_id
+             OR NEW.ingestion_run_id IS DISTINCT FROM OLD.ingestion_run_id
+             OR NEW.job_id IS DISTINCT FROM OLD.job_id
+             OR NEW.attempt IS DISTINCT FROM OLD.attempt
+             OR NEW.worker_id IS DISTINCT FROM OLD.worker_id
+             OR NEW.pipeline_version IS DISTINCT FROM OLD.pipeline_version
+             OR NEW.provider_id IS DISTINCT FROM OLD.provider_id
+             OR NEW.model_id IS DISTINCT FROM OLD.model_id
+             OR NEW.model_digest IS DISTINCT FROM OLD.model_digest
+             OR NEW.prompt_version IS DISTINCT FROM OLD.prompt_version
+             OR NEW.schema_version IS DISTINCT FROM OLD.schema_version
+             OR NEW.parser_version IS DISTINCT FROM OLD.parser_version
+             OR NEW.sampling_config IS DISTINCT FROM OLD.sampling_config
+             OR NEW.sampling_version IS DISTINCT FROM OLD.sampling_version THEN
+            RAISE EXCEPTION 'extraction run provenance is immutable';
+          END IF;
+          RETURN NEW;
+        END; $$
+    """)
+    op.execute("""
+        CREATE TRIGGER extraction_runs_provenance_immutable
+        BEFORE UPDATE ON extraction_runs FOR EACH ROW
+        EXECUTE FUNCTION reject_extraction_run_provenance_mutation()
+    """)
     op.add_column("draft_sets", sa.Column("extraction_run_id", uuid, sa.ForeignKey("extraction_runs.id")))
     op.create_unique_constraint("uq_draft_set_extraction_run", "draft_sets", ["extraction_run_id"])
     op.add_column("draft_candidates", sa.Column("extraction_run_id", uuid, sa.ForeignKey("extraction_runs.id")))
@@ -96,6 +125,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS extraction_runs_provenance_immutable ON extraction_runs")
+    op.execute("DROP FUNCTION IF EXISTS reject_extraction_run_provenance_mutation()")
     op.execute("DROP TRIGGER IF EXISTS draft_relations_endpoint_integrity ON draft_relations")
     op.execute("DROP FUNCTION IF EXISTS validate_draft_relation_endpoints()")
     op.drop_constraint("ck_draft_relation_target_endpoint", "draft_relations", type_="check")

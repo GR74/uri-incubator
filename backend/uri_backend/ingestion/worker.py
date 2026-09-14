@@ -126,13 +126,9 @@ def build_normalization_handler(
 
 def _configured_extraction_config(settings: Settings) -> ExtractionConfig:
     return ExtractionConfig(
-        model_id=settings.generation_model or "unconfigured",
-        model_digest=settings.generation_model_digest or "unavailable",
         prompt_version="extraction-prompt-v1",
         schema_version="candidate-batch-v1",
         parser_version="normalization-v1",
-        sampling_config={"temperature": 0},
-        sampling_version="sampling-v1",
     )
 
 

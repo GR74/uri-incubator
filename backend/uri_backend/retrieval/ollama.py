@@ -12,6 +12,8 @@ from pydantic import BaseModel, ValidationError
 from uri_backend.retrieval.providers import (
     EmbeddingBatchError,
     EmbeddingDimensionError,
+    GenerationCallMetadata,
+    GenerationSpec,
     ProviderConnectionError,
     ProviderResponseError,
     ProviderSchemaError,
@@ -33,6 +35,8 @@ class OllamaProvider:
         embedding_model: str,
         timeout: float,
         expected_embedding_dimension: int = 384,
+        *,
+        generation_model_digest: str,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -41,9 +45,27 @@ class OllamaProvider:
         self.timeout = timeout
         self.expected_embedding_dimension = expected_embedding_dimension
         self.transport = transport
+        self._generation_spec = GenerationSpec(
+            "ollama",
+            generation_model,
+            generation_model_digest,
+            {"temperature": 0},
+            "ollama-chat-v1",
+        )
         self._response_metadata: ContextVar[dict[str, object] | None] = ContextVar(
             "ollama_response_metadata", default=None
         )
+        self._generation_metadata: ContextVar[GenerationCallMetadata | None] = ContextVar(
+            "ollama_generation_metadata", default=None
+        )
+
+    @property
+    def generation_spec(self) -> GenerationSpec:
+        return self._generation_spec
+
+    @property
+    def last_generation_metadata(self) -> GenerationCallMetadata | None:
+        return self._generation_metadata.get()
 
     @property
     def response_metadata(self) -> dict[str, object] | None:
@@ -67,9 +89,15 @@ class OllamaProvider:
         except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
             raise ProviderSchemaError("provider_invalid_json") from None
         try:
-            return request.schema.model_validate(payload)
+            result = request.schema.model_validate(payload)
         except ValidationError:
             raise ProviderSchemaError("provider_schema_invalid") from None
+        self._generation_metadata.set(
+            GenerationCallMetadata.from_spec(
+                self._generation_spec, self.response_metadata or {}
+            )
+        )
+        return result
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         response = await self._post(
@@ -115,6 +143,12 @@ class OllamaProvider:
             "status_code": response.status_code,
             "model": payload["model"],
         })
+        if path == "/api/chat":
+            self._generation_metadata.set(
+                GenerationCallMetadata.from_spec(
+                    self._generation_spec, self.response_metadata or {}
+                )
+            )
         return response
 
     def _decode_response(self, response: httpx.Response) -> dict[str, object]:
