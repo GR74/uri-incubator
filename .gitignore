@@ -4,6 +4,7 @@ node_modules/
 _*.html
 _srv.py
 .DS_Store
+.env
 backend/.env
 backend/.local/
 backend/.pytest_cache/
