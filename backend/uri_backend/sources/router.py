@@ -534,7 +534,11 @@ async def get_ingestion_status(
     run = await session.scalar(
         sa.select(IngestionRun)
         .join(SourceVersion, IngestionRun.source_version_id == SourceVersion.id)
-        .where(SourceVersion.project_id == project_id, SourceVersion.id == version_id)
+        .where(
+            SourceVersion.project_id == project_id,
+            SourceVersion.id == version_id,
+            IngestionRun.pipeline_version == "normalization-v1",
+        )
     )
     if run is None:
         raise HTTPException(status_code=404, detail="Ingestion run not found.")

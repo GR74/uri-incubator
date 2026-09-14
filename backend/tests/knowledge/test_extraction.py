@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
@@ -32,7 +36,9 @@ from uri_backend.knowledge.extraction import (
 )
 from uri_backend.knowledge.models import (
     CandidateCitation,
+    DraftCandidate,
     DraftRelation,
+    DraftRelationCitation,
     DraftSet,
     Record,
 )
@@ -335,3 +341,36 @@ async def test_retryable_provider_failure_returns_job_to_queue(db_engine, seed_p
     async with factory() as verify:
         job = await verify.scalar(sa.select(IngestionJob).where(IngestionJob.run_id == run.id))
         assert job is not None and job.status == "queued" and job.attempt == 1
+
+
+async def test_record_endpoint_relation_is_cleaned_by_0009_downgrade_and_reupgrade(db_engine, seed_parts, test_database_url) -> None:
+    """Downgrade deliberately removes Task-3-only record endpoints before NOT NULL restoration."""
+    session, version, parts = seed_parts
+    draft = DraftSet(project_id=version.project_id, author_id=version.created_by)
+    candidate = DraftCandidate(draft_set=draft, candidate_type="result", statement="Cited candidate.", payload={}, confidence=0.8)
+    record = Record(project_id=version.project_id, record_type="result")
+    session.add_all([draft, candidate, record])
+    await session.flush()
+    session.add(CandidateCitation(candidate_id=candidate.id, content_part_id=parts[0].id, quote="reported a difference"))
+    relation = DraftRelation(draft_set_id=draft.id, source_record_id=record.id, target_candidate_id=candidate.id, relation_type="supports")
+    session.add(relation)
+    await session.flush()
+    session.add(DraftRelationCitation(draft_relation_id=relation.id, content_part_id=parts[0].id, quote="reported a difference"))
+    await session.commit()
+    await session.close()
+    environment = {**os.environ, "URI_DATABASE_URL": test_database_url, "URI_TEST_DATABASE_URL": test_database_url}
+    backend_root = Path(__file__).parents[2]
+    for revision in ("20260913_0008", "head"):
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, "-m", "alembic", "downgrade" if revision != "head" else "upgrade", revision],
+            cwd=backend_root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as verify:
+        assert await verify.scalar(sa.select(sa.func.count()).select_from(DraftRelation)) == 0
