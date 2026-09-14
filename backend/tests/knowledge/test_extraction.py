@@ -297,6 +297,33 @@ async def test_extraction_rejects_mismatched_provider_call_metadata(seed_parts) 
     assert await session.scalar(sa.select(sa.func.count()).select_from(DraftSet)) == 0
 
 
+async def test_failed_window_preserves_safe_ordered_call_evidence(seed_parts) -> None:
+    """A provider failure still leaves a bounded, source-free window ledger."""
+    session, version, _ = seed_parts
+    provider = FakeStructuredProvider(
+        CandidateBatch(), provider_error=ProviderSchemaError("provider_schema_invalid")
+    )
+
+    with pytest.raises(ProviderSchemaError, match="provider_schema_invalid"):
+        await extract_candidates(session, version.id, provider, TEST_CONFIG)
+
+    run = await session.scalar(sa.select(ExtractionRun))
+    assert run is not None and run.status == "failed"
+    assert run.call_metadata == [
+        {
+            "window_index": 0,
+            "provider_id": "fake-structured",
+            "model_id": "fake-structured-model",
+            "model_digest": "sha256:" + "f" * 64,
+            "sampling_config": {"temperature": 0},
+            "sampling_version": "fake-sampling-v1",
+            "response_metadata": {},
+            "outcome": "failed",
+            "error_code": "provider_schema_invalid",
+        }
+    ]
+
+
 async def test_extraction_run_provenance_is_immutable_in_orm_and_postgres(seed_parts) -> None:
     """Lifecycle data may change, but a run's call identity cannot be rewritten."""
     session, version, _ = seed_parts
@@ -314,9 +341,35 @@ async def test_extraction_run_provenance_is_immutable_in_orm_and_postgres(seed_p
     with pytest.raises(ExtractionProvenanceError):
         await session.commit()
     await session.rollback()
+    run.call_metadata = [{"window_index": 99}]
+    with pytest.raises(ExtractionProvenanceError, match="call metadata"):
+        await session.commit()
+    await session.rollback()
     with pytest.raises(sa.exc.DBAPIError, match="extraction run provenance is immutable"):
         await session.execute(sa.update(ExtractionRun).where(ExtractionRun.id == run_id).values(model_id="rewritten"))
     await session.rollback()
+    with pytest.raises(sa.exc.DBAPIError, match="call metadata is immutable"):
+        await session.execute(
+            sa.update(ExtractionRun)
+            .where(ExtractionRun.id == run_id)
+            .values(call_metadata=[{"window_index": 99}])
+        )
+    await session.rollback()
+
+
+async def test_nested_finalized_call_metadata_edit_does_not_persist(seed_parts) -> None:
+    """Detached JSON history cannot mutate finalized provenance behind the ORM's back."""
+    session, version, _ = seed_parts
+    await extract_candidates(session, version.id, FakeStructuredProvider(CandidateBatch()), TEST_CONFIG)
+    run = await session.scalar(sa.select(ExtractionRun))
+    assert run is not None
+    run_id = run.id
+    run.call_metadata[0]["response_metadata"]["status_code"] = 500
+    await session.commit()
+    session.expire_all()
+    reloaded = await session.get(ExtractionRun, run_id)
+    assert reloaded is not None
+    assert reloaded.call_metadata[0]["response_metadata"]["status_code"] == 200
 
 
 async def test_duplicate_key_alias_preserves_relation(seed_parts) -> None:

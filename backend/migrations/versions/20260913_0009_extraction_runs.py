@@ -65,6 +65,10 @@ def upgrade() -> None:
              OR NEW.sampling_version IS DISTINCT FROM OLD.sampling_version THEN
             RAISE EXCEPTION 'extraction run provenance is immutable';
           END IF;
+          IF NEW.call_metadata IS DISTINCT FROM OLD.call_metadata
+             AND (OLD.status <> 'running' OR NEW.status <> 'running') THEN
+            RAISE EXCEPTION 'extraction run call metadata is immutable after finalization';
+          END IF;
           RETURN NEW;
         END; $$
     """)

@@ -79,16 +79,25 @@ class FakeStructuredProvider:
     def last_generation_metadata(self) -> GenerationCallMetadata | None:
         return self._last_generation_metadata
 
+    async def prepare_generation(self) -> GenerationSpec:
+        return self._generation_spec
+
     async def generate(self, request: StructuredRequest[ModelT]) -> ModelT:
         self.requests.append(request)
         active_spec = self.call_specs[len(self.requests) - 1] if len(self.requests) <= len(self.call_specs) else self._generation_spec
+        if self.is_unavailable:
+            self._last_generation_metadata = GenerationCallMetadata.from_spec(
+                active_spec, {}, outcome="failed", error_code="provider_unavailable"
+            )
+            raise ProviderUnavailableError()
+        if self.provider_error is not None:
+            self._last_generation_metadata = GenerationCallMetadata.from_spec(
+                active_spec, {}, outcome="failed", error_code=self.provider_error.code
+            )
+            raise self.provider_error
         self._last_generation_metadata = GenerationCallMetadata.from_spec(
             active_spec, {"status_code": 200}
         )
-        if self.is_unavailable:
-            raise ProviderUnavailableError()
-        if self.provider_error is not None:
-            raise self.provider_error
         if self.result is None:
             raise FakeProviderConfigurationError(
                 "FakeStructuredProvider requires an explicit result."

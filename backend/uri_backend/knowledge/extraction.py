@@ -33,11 +33,12 @@ from uri_backend.retrieval.providers import (
     ProviderSchemaError,
     StructuredGenerationProvider,
     StructuredRequest,
+    generation_json,
 )
 from uri_backend.sources.models import ContentPart, SourceVersion
 
 EXTRACTION_PIPELINE_VERSION = "extraction-v1"
-SAFE_RESPONSE_KEYS = frozenset({"status_code", "model", "done", "eval_count", "prompt_eval_count", "total_duration"})
+SAFE_RESPONSE_KEYS = frozenset({"status_code", "model", "done", "eval_count", "prompt_eval_count", "total_duration", "observed_digest"})
 
 
 @dataclass(frozen=True)
@@ -97,9 +98,11 @@ def _provider_call_entry(
         "provider_id": metadata.provider_id,
         "model_id": metadata.model_id,
         "model_digest": metadata.model_digest,
-        "sampling_config": dict(metadata.sampling_config),
+        "sampling_config": generation_json(metadata.sampling_config),
         "sampling_version": metadata.sampling_version,
         "response_metadata": _safe_response_metadata(metadata.response_metadata),
+        "outcome": metadata.outcome,
+        "error_code": metadata.error_code,
     }
     return metadata, entry
 
@@ -197,16 +200,18 @@ async def _record_provider_failure(
             session, source_version_id, config, generation_spec, ingestion_run_id,
             getattr(claimed_job, "id", None), getattr(claimed_job, "attempt", None), getattr(claimed_job, "worker_id", None),
         )
+        run.call_metadata = call_metadata or []
+        run.response_metadata = (
+            call_metadata[-1]["response_metadata"] if call_metadata else {}
+        )
+        # The database only permits call-history accumulation on a running run.
+        await session.flush()
         if isinstance(error, ProviderError):
             run.status = "retry" if error.retryable else "failed"
             run.error_code, run.error_detail = error.code, "Provider extraction failed"
         else:
             run.status, run.error_code, run.error_detail = "failed", "internal_error", "Extraction failed"
         run.completed_at = sa.func.now() if run.status == "failed" else None
-        run.call_metadata = call_metadata or []
-        run.response_metadata = (
-            call_metadata[-1]["response_metadata"] if call_metadata else {}
-        )
 
 
 def _validated_citations(
@@ -276,7 +281,11 @@ async def extract_candidates(
     )).all())
     part_by_id = {part.id: part for part in parts}
     project_id, author_id = source_version.project_id, source_version.created_by
-    generation_spec = _provider_generation_spec(provider)
+    # Ask the provider to attest its actual configured model before durable
+    # provenance is created.  Ollama verifies this against /api/tags.
+    generation_spec = await provider.prepare_generation()
+    if not isinstance(generation_spec, GenerationSpec):
+        raise ProviderSchemaError("provider_generation_spec_invalid")
     await session.commit()
 
     async with session.begin():
@@ -310,7 +319,15 @@ async def extract_candidates(
                     {"role": "user", "content": window},
                 ],
             )
-            response = await provider.generate(request)
+            try:
+                response = await provider.generate(request)
+            except Exception:
+                # Providers expose safe task-local metadata even for failures.
+                metadata, entry = _provider_call_entry(provider, window_index)
+                call_metadata.append(entry)
+                if not _metadata_matches_spec(metadata, generation_spec):
+                    raise ProviderSchemaError("provider_metadata_mismatch") from None
+                raise
             metadata, entry = _provider_call_entry(provider, window_index)
             call_metadata.append(entry)
             if not _metadata_matches_spec(metadata, generation_spec):
@@ -445,9 +462,11 @@ async def extract_candidates(
             session.add(persisted_relation)
             await session.flush()
             session.add_all([DraftRelationCitation(draft_relation_id=persisted_relation.id, content_part_id=item.part_id, quote=_normalized(item.quote)) for item in citations])
-        run.status, run.warnings = "succeeded", warnings
         run.call_metadata = call_metadata
         run.response_metadata = call_metadata[-1]["response_metadata"] if call_metadata else {}
+        # Finalize only after the running-row call history has been flushed.
+        await session.flush()
+        run.status, run.warnings = "succeeded", warnings
         run.completed_at = sa.func.now()
         await session.flush()
         return draft

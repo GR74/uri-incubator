@@ -36,10 +36,19 @@ class CandidateBatch(BaseModel):
 TEST_DIGEST = "sha256:" + "a" * 64
 
 
+def tags_payload(*models: dict[str, object]) -> dict[str, object]:
+    return {"models": list(models)}
+
+
 def provider_with_response(response: httpx.Response | Exception) -> OllamaProvider:
     async def handler(request: httpx.Request) -> httpx.Response:
         if isinstance(response, Exception):
             raise response
+        if request.url.path == "/api/tags":
+            return httpx.Response(
+                200,
+                json=tags_payload({"name": "pilot-model", "digest": TEST_DIGEST}),
+            )
         return response
 
     return OllamaProvider(
@@ -58,7 +67,15 @@ async def test_ollama_structured_generation_sends_exact_json_schema() -> None:
 
     async def handler(request: httpx.Request) -> httpx.Response:
         captured.append(request)
-        return httpx.Response(200, json={"message": {"content": '{"items": []}'}, "done": True})
+        if request.url.path == "/api/tags":
+            return httpx.Response(
+                200,
+                json=tags_payload({"name": "pilot-model", "digest": TEST_DIGEST}),
+            )
+        return httpx.Response(
+            200,
+            json={"model": "pilot-model", "message": {"content": '{"items": []}'}, "done": True},
+        )
 
     provider = OllamaProvider(
         base_url="http://127.0.0.1:11434",
@@ -73,9 +90,9 @@ async def test_ollama_structured_generation_sends_exact_json_schema() -> None:
     result = await provider.generate(StructuredRequest(schema=CandidateBatch, messages=[]))
 
     assert result == CandidateBatch(items=[])
-    assert len(captured) == 1
-    body = json.loads(captured[0].content)
-    assert captured[0].url == "http://127.0.0.1:11434/api/chat"
+    assert [request.url.path for request in captured] == ["/api/tags", "/api/chat"]
+    body = json.loads(captured[1].content)
+    assert captured[1].url == "http://127.0.0.1:11434/api/chat"
     assert body == {
         "model": "pilot-model",
         "messages": [],
@@ -91,6 +108,68 @@ async def test_ollama_structured_generation_sends_exact_json_schema() -> None:
     assert provider.generation_spec.model_digest == TEST_DIGEST
     assert provider.last_generation_metadata is not None
     assert provider.last_generation_metadata.sampling_config == {"temperature": 0}
+
+
+@pytest.mark.parametrize(
+    ("models", "code"),
+    [
+        ([], "provider_model_missing"),
+        ([{"name": "pilot-model", "digest": "b" * 64}], "provider_model_digest_mismatch"),
+    ],
+)
+async def test_ollama_rejects_unverified_generation_model(
+    models: list[dict[str, object]], code: str
+) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json=tags_payload(*models))
+        raise AssertionError("chat must not run with an unverified model")
+
+    provider = OllamaProvider(
+        "http://127.0.0.1:11434", "pilot-model", "pilot-embed", 30, 2,
+        generation_model_digest=TEST_DIGEST,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ProviderSchemaError, match=code):
+        await provider.generate(StructuredRequest(schema=CandidateBatch, messages=[]))
+
+
+async def test_ollama_rejects_chat_response_from_another_model() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json=tags_payload({"model": "pilot-model", "digest": TEST_DIGEST}))
+        return httpx.Response(200, json={"model": "other-model", "message": {"content": '{"items": []}'}})
+
+    provider = OllamaProvider(
+        "http://127.0.0.1:11434", "pilot-model", "pilot-embed", 30, 2,
+        generation_model_digest=TEST_DIGEST,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ProviderSchemaError, match="provider_model_mismatch"):
+        await provider.generate(StructuredRequest(schema=CandidateBatch, messages=[]))
+
+
+async def test_ollama_failed_chat_keeps_safe_task_local_metadata() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json=tags_payload({"name": "pilot-model", "digest": TEST_DIGEST}))
+        return httpx.Response(200, json={"model": "pilot-model", "message": {"content": "not-json"}})
+
+    provider = OllamaProvider(
+        "http://127.0.0.1:11434", "pilot-model", "pilot-embed", 30, 2,
+        generation_model_digest=TEST_DIGEST,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(ProviderSchemaError, match="provider_invalid_json"):
+        await provider.generate(StructuredRequest(schema=CandidateBatch, messages=[]))
+
+    metadata = provider.last_generation_metadata
+    assert metadata is not None
+    assert (metadata.outcome, metadata.error_code) == ("failed", "provider_invalid_json")
+    assert "messages" not in metadata.response_metadata
 
 
 async def test_embedding_dimension_mismatch_is_rejected() -> None:
@@ -127,8 +206,12 @@ async def test_ollama_timeout_and_connection_errors_are_retryable() -> None:
 
 
 async def test_invalid_json_and_schema_are_terminal() -> None:
-    invalid_json = provider_with_response(httpx.Response(200, json={"message": {"content": "nope"}}))
-    invalid_schema = provider_with_response(httpx.Response(200, json={"message": {"content": '{"items": [1]}'}}))
+    invalid_json = provider_with_response(
+        httpx.Response(200, json={"model": "pilot-model", "message": {"content": "nope"}})
+    )
+    invalid_schema = provider_with_response(
+        httpx.Response(200, json={"model": "pilot-model", "message": {"content": '{"items": [1]}'}})
+    )
 
     with pytest.raises(ProviderSchemaError) as json_error:
         await invalid_json.generate(StructuredRequest(schema=CandidateBatch, messages=[]))
@@ -256,9 +339,17 @@ async def test_ollama_embeddings_preserve_order_and_normalize_finite_numbers() -
 
 async def test_response_metadata_is_task_local_for_shared_provider() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return httpx.Response(
+                200,
+                json=tags_payload({"name": "pilot-model", "digest": TEST_DIGEST}),
+            )
         body = json.loads(request.content)
         done = body["messages"][0]["content"] == "complete"
-        return httpx.Response(200, json={"message": {"content": '{"items": []}'}, "done": done})
+        return httpx.Response(
+            200,
+            json={"model": "pilot-model", "message": {"content": '{"items": []}'}, "done": done},
+        )
 
     provider = OllamaProvider(
         "http://127.0.0.1:11434", "pilot-model", "pilot-embed", 30, 2,
@@ -286,8 +377,10 @@ def test_enabled_local_ai_rejects_noncanonical_generation_digest() -> None:
 
 def test_generation_spec_freezes_effective_sampling_configuration() -> None:
     spec = GenerationSpec(
-        "test-provider", "test-model", TEST_DIGEST, {"temperature": 0}, "test-v1"
+        "test-provider", "test-model", TEST_DIGEST,
+        {"nested": {"temperatures": [0]}}, "test-v1"
     )
 
     with pytest.raises(TypeError):
-        spec.sampling_config["temperature"] = 1  # type: ignore[index]
+        spec.sampling_config["nested"]["temperatures"] = ()  # type: ignore[index]
+    assert spec.sampling_config["nested"]["temperatures"] == (0,)  # type: ignore[index]

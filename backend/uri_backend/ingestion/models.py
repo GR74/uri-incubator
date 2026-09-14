@@ -118,3 +118,7 @@ def _reject_extraction_provenance_mutation(
     state = sa.inspect(target)
     if any(state.attrs[name].history.has_changes() for name in _EXTRACTION_PROVENANCE_FIELDS):
         raise ExtractionProvenanceError("Extraction run provenance is immutable.")
+    if state.attrs["call_metadata"].history.has_changes() and target.status != "running":
+        raise ExtractionProvenanceError(
+            "Extraction run call metadata is immutable after finalization."
+        )

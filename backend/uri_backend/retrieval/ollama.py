@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Sequence
 from contextvars import ContextVar
 from typing import TypeVar
@@ -15,6 +16,7 @@ from uri_backend.retrieval.providers import (
     GenerationCallMetadata,
     GenerationSpec,
     ProviderConnectionError,
+    ProviderError,
     ProviderResponseError,
     ProviderSchemaError,
     ProviderTimeoutError,
@@ -23,6 +25,7 @@ from uri_backend.retrieval.providers import (
 )
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+_TAG_DIGEST = re.compile(r"(?:sha256:)?([0-9a-f]{64})\Z")
 
 
 class OllamaProvider:
@@ -52,6 +55,9 @@ class OllamaProvider:
             {"temperature": 0},
             "ollama-chat-v1",
         )
+        self._prepared_generation_spec: ContextVar[GenerationSpec] = ContextVar(
+            "ollama_prepared_generation_spec", default=self._generation_spec
+        )
         self._response_metadata: ContextVar[dict[str, object] | None] = ContextVar(
             "ollama_response_metadata", default=None
         )
@@ -61,7 +67,7 @@ class OllamaProvider:
 
     @property
     def generation_spec(self) -> GenerationSpec:
-        return self._generation_spec
+        return self._prepared_generation_spec.get()
 
     @property
     def last_generation_metadata(self) -> GenerationCallMetadata | None:
@@ -72,31 +78,77 @@ class OllamaProvider:
         metadata = self._response_metadata.get()
         return dict(metadata) if metadata is not None else None
 
-    async def generate(self, request: StructuredRequest[ModelT]) -> ModelT:
-        response = await self._post(
-            "/api/chat",
-            {
-                "model": self.generation_model,
-                "messages": list(request.messages),
-                "format": request.schema.model_json_schema(),
-                "stream": False,
-                "options": {"temperature": 0},
-            },
-        )
+    async def prepare_generation(self) -> GenerationSpec:
         try:
-            content = self._decode_response(response)["message"]["content"]
-            payload = json.loads(content)
-        except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
-            raise ProviderSchemaError("provider_invalid_json") from None
-        try:
-            result = request.schema.model_validate(payload)
-        except ValidationError:
-            raise ProviderSchemaError("provider_schema_invalid") from None
-        self._generation_metadata.set(
-            GenerationCallMetadata.from_spec(
-                self._generation_spec, self.response_metadata or {}
+            response = await self._get("/api/tags")
+            body = self._decode_response(response)
+            models = body.get("models")
+            if not isinstance(models, list):
+                raise ProviderSchemaError("provider_model_missing")
+            matched = next(
+                (
+                    item
+                    for item in models
+                    if isinstance(item, dict)
+                    and (item.get("name") == self.generation_model or item.get("model") == self.generation_model)
+                ),
+                None,
             )
-        )
+            if matched is None:
+                raise ProviderSchemaError("provider_model_missing")
+            digest = matched.get("digest")
+            if not isinstance(digest, str) or (match := _TAG_DIGEST.fullmatch(digest)) is None:
+                raise ProviderSchemaError("provider_model_digest_invalid")
+            observed_digest = "sha256:" + match.group(1)
+            metadata = self.response_metadata or {}
+            metadata["observed_digest"] = observed_digest
+            self._response_metadata.set(metadata)
+            if observed_digest != self._generation_spec.model_digest:
+                raise ProviderSchemaError("provider_model_digest_mismatch")
+            spec = GenerationSpec(
+                self._generation_spec.provider_id,
+                self.generation_model,
+                observed_digest,
+                self._generation_spec.sampling_config,
+                self._generation_spec.sampling_version,
+            )
+            self._prepared_generation_spec.set(spec)
+            return spec
+        except ProviderError as error:
+            self._record_generation_metadata("failed", error.code)
+            raise
+
+    async def generate(self, request: StructuredRequest[ModelT]) -> ModelT:
+        spec = await self.prepare_generation()
+        try:
+            response = await self._post(
+                "/api/chat",
+                {
+                    "model": self.generation_model,
+                    "messages": list(request.messages),
+                    "format": request.schema.model_json_schema(),
+                    "stream": False,
+                    "options": {"temperature": 0},
+                },
+            )
+            body = self._decode_response(response)
+            if body.get("model") != self.generation_model:
+                raise ProviderSchemaError("provider_model_mismatch")
+            content = body["message"]["content"]
+            payload = json.loads(content)
+            result = request.schema.model_validate(payload)
+        except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+            error = ProviderSchemaError("provider_invalid_json")
+            self._record_generation_metadata("failed", error.code, spec)
+            raise error from None
+        except ValidationError:
+            error = ProviderSchemaError("provider_schema_invalid")
+            self._record_generation_metadata("failed", error.code, spec)
+            raise error from None
+        except ProviderError as error:
+            self._record_generation_metadata("failed", error.code, spec)
+            raise
+        self._record_generation_metadata("succeeded", None, spec)
         return result
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
@@ -139,17 +191,38 @@ class OllamaProvider:
             raise ProviderResponseError() from None
         except httpx.TransportError:
             raise ProviderConnectionError() from None
-        self._response_metadata.set({
-            "status_code": response.status_code,
-            "model": payload["model"],
-        })
-        if path == "/api/chat":
-            self._generation_metadata.set(
-                GenerationCallMetadata.from_spec(
-                    self._generation_spec, self.response_metadata or {}
-                )
-            )
+        self._response_metadata.set({"status_code": response.status_code, "model": payload["model"]})
         return response
+
+    async def _get(self, path: str) -> httpx.Response:
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(self.timeout), transport=self.transport
+            ) as client:
+                response = await client.get(f"{self.base_url}{path}")
+                response.raise_for_status()
+        except httpx.TimeoutException:
+            raise ProviderTimeoutError() from None
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code >= 500:
+                raise ProviderUnavailableError() from None
+            raise ProviderResponseError() from None
+        except httpx.TransportError:
+            raise ProviderConnectionError() from None
+        self._response_metadata.set({"status_code": response.status_code})
+        return response
+
+    def _record_generation_metadata(
+        self, outcome: str, error_code: str | None, spec: GenerationSpec | None = None
+    ) -> None:
+        self._generation_metadata.set(
+            GenerationCallMetadata.from_spec(
+                spec or self.generation_spec,
+                self.response_metadata or {},
+                outcome=outcome,
+                error_code=error_code,
+            )
+        )
 
     def _decode_response(self, response: httpx.Response) -> dict[str, object]:
         try:

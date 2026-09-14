@@ -17,6 +17,27 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 _MODEL_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
+def _freeze_json(value: object) -> object:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("generation metadata keys must be strings")
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(item) for item in value)
+    raise ValueError("generation metadata must be JSON-compatible")
+
+
+def generation_json(value: object) -> object:
+    """Return a detached plain JSON-compatible value for durable provenance."""
+    if isinstance(value, Mapping):
+        return {key: generation_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [generation_json(item) for item in value]
+    return value
+
+
 @dataclass(frozen=True)
 class GenerationSpec:
     """Provider-declared immutable identity and effective generation settings."""
@@ -32,7 +53,9 @@ class GenerationSpec:
             raise ValueError("generation identity fields must be nonblank")
         if _MODEL_DIGEST.fullmatch(self.model_digest) is None:
             raise ValueError("model_digest must be canonical sha256:<64 lowercase hex>")
-        object.__setattr__(self, "sampling_config", MappingProxyType(dict(self.sampling_config)))
+        frozen = _freeze_json(self.sampling_config)
+        assert isinstance(frozen, Mapping)
+        object.__setattr__(self, "sampling_config", frozen)
 
 
 @dataclass(frozen=True)
@@ -45,22 +68,34 @@ class GenerationCallMetadata:
     sampling_config: Mapping[str, object]
     sampling_version: str
     response_metadata: Mapping[str, object]
+    outcome: str = "succeeded"
+    error_code: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "sampling_config", MappingProxyType(dict(self.sampling_config)))
-        object.__setattr__(self, "response_metadata", MappingProxyType(dict(self.response_metadata)))
+        sampling = _freeze_json(self.sampling_config)
+        response = _freeze_json(self.response_metadata)
+        assert isinstance(sampling, Mapping) and isinstance(response, Mapping)
+        object.__setattr__(self, "sampling_config", sampling)
+        object.__setattr__(self, "response_metadata", response)
 
     @classmethod
     def from_spec(
-        cls, spec: GenerationSpec, response_metadata: dict[str, object]
+        cls,
+        spec: GenerationSpec,
+        response_metadata: Mapping[str, object],
+        *,
+        outcome: str = "succeeded",
+        error_code: str | None = None,
     ) -> GenerationCallMetadata:
         return cls(
             provider_id=spec.provider_id,
             model_id=spec.model_id,
             model_digest=spec.model_digest,
-            sampling_config=dict(spec.sampling_config),
+            sampling_config=spec.sampling_config,
             sampling_version=spec.sampling_version,
-            response_metadata=dict(response_metadata),
+            response_metadata=response_metadata,
+            outcome=outcome,
+            error_code=error_code,
         )
 
 
@@ -78,6 +113,9 @@ class EmbeddingProvider(Protocol):
 
 
 class StructuredGenerationProvider(Protocol):
+    async def prepare_generation(self) -> GenerationSpec:
+        """Verify and return identity/settings before a generation attempt."""
+
     @property
     def generation_spec(self) -> GenerationSpec:
         """Identity and settings the provider will actually apply to generation."""
@@ -145,6 +183,9 @@ class UnavailableProvider:
     @property
     def last_generation_metadata(self) -> GenerationCallMetadata | None:
         return None
+
+    async def prepare_generation(self) -> GenerationSpec:
+        return self._generation_spec
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         raise ProviderUnavailableError()
